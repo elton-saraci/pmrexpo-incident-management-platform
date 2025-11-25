@@ -17,7 +17,7 @@ services:
     #         - capabilities: ["gpu"]
 
   app:
-    build: .
+    build: ..
     container_name: disaster-ai-app
     restart: unless-stopped
     depends_on:
