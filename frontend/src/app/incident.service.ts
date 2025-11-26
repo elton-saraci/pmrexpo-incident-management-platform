@@ -16,7 +16,7 @@ export class IncidentService {
 
   constructor(private http: HttpClient) {}
 
-  reportIncident(report: IncidentReport): Observable<any> {
+  reportIncident(report: FormData): Observable<any> {
     return this.http.post(`${this.baseUrl}/report`, report);
   }
 }

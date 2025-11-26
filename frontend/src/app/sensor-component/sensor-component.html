@@ -30,10 +30,6 @@
           <span *ngIf="lastStatus === 'error'">⚠️</span>
           <span>{{ lastMessage }}</span>
         </div>
-  
-        <code class="payload-preview" *ngIf="lastPayload">
-          {{ lastPayload | json }}
-        </code>
       </section>
   
       <section class="grid">

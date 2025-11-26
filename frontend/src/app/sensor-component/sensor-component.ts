@@ -47,7 +47,7 @@ export class SensorComponent {
   isSending = false;
   lastStatus: 'idle' | 'success' | 'error' = 'idle';
   lastMessage = '';
-  lastPayload?: IncidentReport;
+  lastPayload?: FormData;
 
   disasters: DisasterScenario[] = [
     {
@@ -143,12 +143,11 @@ export class SensorComponent {
       return;
     }
 
-    const payload: IncidentReport = {
-      type: disaster.type,
-      latitude: this.latitude,
-      longitude: this.longitude,
-      severity_score: severity.score,
-    };
+    const payload: FormData = new FormData();
+    payload.append("type", disaster.type);
+    payload.append("latitude", this.latitude.toString());
+    payload.append("longitude", this.longitude.toString());
+    payload.append("severity_score", severity.score.toString());
 
     this.isSending = true;
     this.lastStatus = 'idle';
