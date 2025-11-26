@@ -1,114 +1,198 @@
 import { HttpClient } from '@angular/common/http';
-import { Component, DOCUMENT, inject } from '@angular/core';
-import { ReactiveFormsModule, FormsModule, FormControl, FormGroup, Validators } from '@angular/forms';
-import { catchError, first, of } from 'rxjs';
-
-// User UI
-// - Send Coordinates
-// - Open Camera
-// 	- jpg
-// - Description
-// - Type
-// 	- Dropdown
+import { Component, DOCUMENT, OnInit, inject } from '@angular/core';
+import {
+  ReactiveFormsModule,
+  FormsModule,
+  FormControl,
+  FormGroup,
+  Validators,
+} from '@angular/forms';
+import { NgIf } from '@angular/common';
 
 @Component({
   selector: 'app-user-component',
-  imports: [FormsModule, ReactiveFormsModule],
+  standalone: true,
+  imports: [FormsModule, ReactiveFormsModule, NgIf],
   templateUrl: './user-component.html',
-  styleUrl: './user-component.scss',
+  styleUrls: ['./user-component.scss'],
 })
-export class UserComponent {
+export class UserComponent implements OnInit {
   private readonly document = inject(DOCUMENT);
   private readonly window = this.document?.defaultView;
-
   private readonly httpClient = inject(HttpClient);
 
-  private latitude: number;
-  private longitude: number;
+  latitude: number | null = null;
+  longitude: number | null = null;
+
+  isGettingLocation = false;
+  isRequestingCamera = false;
+  cameraReady = false;
+  cameraError = '';
+
+  isSubmitting = false;
+  submitSuccess = false;
+  submitError = '';
+  successMessage = 'Thank you. Your incident has been submitted.';
+
+  locationError = '';
+  selectedFileName = '';
 
   form = new FormGroup({
-    type: new FormControl("", Validators.required),
-    description: new FormControl(""),
-    attachments: new FormControl(null)
+    type: new FormControl('', Validators.required),
+    description: new FormControl(''),
+    attachments: new FormControl<File | null>(null),
   });
 
-  public async getCoordinates() {
-    console.log("getCoordinates clicked");
-    if (this.window) {
-      console.log("window vorhanden");
-      this.window.navigator.geolocation.getCurrentPosition(this.successGeolocation);
+  ngOnInit(): void {
+    // Ask for location and camera as soon as the page loads
+    this.autoGetLocation();
+    this.requestCameraAccess();
+  }
+
+  // --- Location handling ---
+
+  private async autoGetLocation() {
+    this.locationError = '';
+    this.isGettingLocation = true;
+
+    try {
+      const position = await this.getLongAndLat();
+      this.latitude = position.coords.latitude;
+      this.longitude = position.coords.longitude;
+    } catch (err) {
+      console.error(err);
+      this.locationError =
+        'We could not access your location automatically. Please allow location access in your browser settings if possible.';
+    } finally {
+      this.isGettingLocation = false;
     }
   }
 
-  public getLongAndLat() {
-    return new Promise((resolve, reject) =>
-        navigator.geolocation.getCurrentPosition(resolve, reject)
-    );
-}
-
-  private successGeolocation(currentPosition: GeolocationPosition) {
-    console.log("wann wird das hier aufgerufen");
-    console.log(currentPosition.coords);
-    console.log(currentPosition.coords.latitude);
-    this.latitude = currentPosition.coords.latitude;
-    this.longitude = currentPosition.coords.longitude;
+  // Optional button handler in the UI
+  async onUseMyLocation() {
+    await this.autoGetLocation();
   }
+
+  public getLongAndLat(): Promise<GeolocationPosition> {
+    return new Promise((resolve, reject) =>
+      navigator.geolocation.getCurrentPosition(resolve, reject)
+    );
+  }
+
+  // --- Camera permission ---
+
+  private async requestCameraAccess() {
+    this.cameraError = '';
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      this.cameraError = 'Camera is not supported on this device.';
+      return;
+    }
+
+    this.isRequestingCamera = true;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+      });
+
+      // We only need permission, stop stream immediately
+      stream.getTracks().forEach((t) => t.stop());
+      this.cameraReady = true;
+    } catch (err) {
+      console.error(err);
+      this.cameraError =
+        'Camera access was denied. You can still upload a photo from your gallery.';
+      this.cameraReady = false;
+    } finally {
+      this.isRequestingCamera = false;
+    }
+  }
+
+  // --- File selection ---
+
+  onFileSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (file) {
+      this.form.controls.attachments.setValue(file);
+      this.selectedFileName = file.name;
+    } else {
+      this.form.controls.attachments.setValue(null);
+      this.selectedFileName = '';
+    }
+  }
+
+  // --- Submit ---
 
   public async formSubmit() {
-    console.log("formSubmitted");
-    await this.getLongAndLat().then((result: GeolocationPosition) => {
-      this.longitude = result.coords.longitude;
-      this.latitude = result.coords.latitude;
-    });
+    if (this.form.invalid) return;
 
-    console.log(this.latitude);
-    console.log(this.longitude);
+    this.isSubmitting = true;
+    this.submitSuccess = false;
+    this.submitError = '';
+    this.locationError = '';
 
-    let url = "http://localhost:5000/api/incidents/report";
+    // Make sure we have coordinates; try again if needed
+    if (!this.latitude || !this.longitude) {
+      try {
+        const position = await this.getLongAndLat();
+        this.latitude = position.coords.latitude;
+        this.longitude = position.coords.longitude;
+      } catch (err) {
+        console.error(err);
+        this.locationError =
+          'Could not access your location. Please allow location access and try again.';
+        this.isSubmitting = false;
+        return;
+      }
+    }
 
-    this.httpClient.get(url).pipe(first()).subscribe(response => {
-      console.log(response);
-    });
-
-    console.log("going to post");
-
-    // let payload = {
-    //   type: this.form.controls.type.value,
-    //   latitude: this.latitude,
-    //   longitude: this.longitude,
-    //   description: this.form.controls.description.value
-    // }
-
-    // if (this.form.controls.attachments.value) {
-    //   payload["files"] = [this.form.controls.attachments.value]
-    // }
+    const url = 'http://localhost:8080/api/incidents/report';
 
     const formData = new FormData();
-    // Append form fields as strings
-    formData.append("type", this.form.controls.type.value as string);
-    formData.append("latitude", this.latitude.toString());
-    formData.append("longitude", this.longitude.toString());
-    // Optional fields
-    if (this.form.controls.description.value) {
-      formData.append("description", this.form.controls.description.value);
+    formData.append('type', this.form.controls.type.value as string);
+    formData.append('latitude', this.latitude.toString());
+    formData.append('longitude', this.longitude.toString());
+
+    const desc = this.form.controls.description.value;
+    if (desc) {
+      formData.append('description', desc);
     }
-    // Attachments (assuming the 'attachments' control holds a File object or similar)
-    // NOTE: This assumes 'attachments' is correctly bound to a file input change event
-    // that stores the actual File object, not just a string path.
-    const file: File = (<HTMLInputElement>document.getElementById("attachmentControl")).files[0];
-    console.log(file);
+
+    const file = this.form.controls.attachments.value;
     if (file instanceof File) {
-      console.log("appending file");
-      // The second argument 'file.name' is optional but good practice
-      formData.append("files", file, file.name);
+      formData.append('files', file, file.name);
     }
 
-    console.log(formData);
+    this.httpClient
+      .post(url, formData, { observe: 'response' })
+      .subscribe({
+        next: (response) => {
+          if (response.status === 201) {
+            this.submitSuccess = true;
+            this.submitError = '';
+            this.form.reset();
+            this.selectedFileName = '';
 
-    this.httpClient.post(url, formData).pipe(catchError(error => of(error))).subscribe(result => {console.log(result)});
-
-    this.httpClient.get(url).pipe(first()).subscribe(response => {
-      console.log(response);
-    });
+            // Auto-hide toast after a few seconds
+            setTimeout(() => {
+              this.submitSuccess = false;
+            }, 4000);
+          } else {
+            this.submitError =
+              'Your report was sent, but the server responded with status ' +
+              response.status +
+              '.';
+          }
+          this.isSubmitting = false;
+        },
+        error: (error) => {
+          console.error(error);
+          this.submitError =
+            'Could not submit your incident. Please try again in a moment.';
+          this.isSubmitting = false;
+        },
+      });
   }
 }

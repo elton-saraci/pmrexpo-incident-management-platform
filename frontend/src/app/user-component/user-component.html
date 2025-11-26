@@ -1,30 +1,187 @@
-<!-- TODO User UI
-- Send Coordinates
-- Open Camera
-	- jpg
-- Type
-	- Dropdown
-- Description -->
+<div class="report-page">
+  <!-- Success toast -->
+  <div class="toast toast--success" *ngIf="submitSuccess">
+    <span class="toast-icon">✅</span>
+    <span class="toast-text">{{ successMessage }}</span>
+  </div>
 
+  <div class="report-card">
+    <header class="report-header">
+      <h1>Report an Incident</h1>
+      <p class="subtitle">
+        Help local emergency services by quickly reporting what you see.
+        Choose a type, optionally add a description or photo. Your location is used
+        automatically in the background.
+      </p>
+    </header>
 
-<form [formGroup]="form" onsubmit="formSubmit()">
-    <div class="grid">
-        Please select the type of incident you would like to report and add an optional description or picture.
-        <label for="typeControl">Type</label>
-        <select id="typeControl" formControlName="type">
-            <option value="" disabled selected>Select type of incident</option>
-            <option value="forest_fire">Forest Fire</option>
-            <option value="house_fire">House on Fire</option>
-            <option value="blackout">Blackout</option>
-            <option value="flood">Flood</option>
-        </select>
-    
-        <label for="descriptionControl">Description (optional)</label>
-        <textarea id="descriptionControl" formControlName="description"></textarea>
-        
-        <label for="attachmentControl" class="button">Upload Picture (optional)</label>
-        <input id="attachmentControl" type="file" name="image" accept="image/*" capture="environment" formControlName="attachments">
-
-        <button type="button" (click)="formSubmit()" [disabled]="!form.valid">Submit Report</button>
+    <!-- Error banner (if submission fails) -->
+    <div class="banner banner--error" *ngIf="submitError">
+      ⚠️ {{ submitError }}
     </div>
-</form>
+
+    <form
+      [formGroup]="form"
+      (ngSubmit)="formSubmit()"
+      class="report-form"
+      novalidate
+    >
+      <!-- Incident type -->
+      <div class="form-group">
+        <label for="typeControl" class="field-label">Incident type</label>
+        <p class="field-hint">
+          Select the category that best matches what you’re reporting.
+        </p>
+
+        <div class="type-grid">
+          <button
+            type="button"
+            class="type-pill"
+            [class.active]="form.controls.type.value === 'forest_fire'"
+            (click)="form.controls.type.setValue('forest_fire')"
+          >
+            <span class="icon">🌲🔥</span>
+            <span class="pill-text">
+              <span class="pill-title">Forest fire</span>
+              <span class="pill-sub">Smoke or fire in vegetation</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="type-pill"
+            [class.active]="form.controls.type.value === 'house_fire'"
+            (click)="form.controls.type.setValue('house_fire')"
+          >
+            <span class="icon">🏠🔥</span>
+            <span class="pill-text">
+              <span class="pill-title">House on fire</span>
+              <span class="pill-sub">Residential or building fire</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="type-pill"
+            [class.active]="form.controls.type.value === 'blackout'"
+            (click)="form.controls.type.setValue('blackout')"
+          >
+            <span class="icon">💡⚡</span>
+            <span class="pill-text">
+              <span class="pill-title">Blackout</span>
+              <span class="pill-sub">Power outage in the area</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="type-pill"
+            [class.active]="form.controls.type.value === 'flood'"
+            (click)="form.controls.type.setValue('flood')"
+          >
+            <span class="icon">🌊</span>
+            <span class="pill-text">
+              <span class="pill-title">Flood</span>
+              <span class="pill-sub">High water or flooded streets</span>
+            </span>
+          </button>
+        </div>
+
+        <div class="field-error" *ngIf="form.controls.type.invalid && form.touched">
+          Please select an incident type.
+        </div>
+      </div>
+
+      <!-- Location -->
+      <div class="form-group">
+
+        <div class="location-row">
+
+          <div class="location-status" *ngIf="!isGettingLocation && latitude && longitude">
+          </div>
+
+          <div class="location-status" *ngIf="!isGettingLocation && (!latitude || !longitude)">
+            <span>Location not available yet</span>
+          </div>
+        </div>
+
+        <div class="field-error" *ngIf="locationError">
+          {{ locationError }}
+        </div>
+      </div>
+
+      <!-- Description -->
+      <div class="form-group">
+        <label for="descriptionControl" class="field-label">
+          Description <span class="optional">(optional)</span>
+        </label>
+        <p class="field-hint">
+          Briefly describe what you see (e.g. “heavy smoke, strong wind, people nearby”).
+        </p>
+        <textarea
+          id="descriptionControl"
+          formControlName="description"
+          rows="3"
+          placeholder="Add any details that might be useful for responders…"
+        ></textarea>
+      </div>
+
+      <!-- Photo / Camera section -->
+      <div class="form-group">
+        <label class="field-label">
+          Photo <span class="optional">(optional)</span>
+        </label>
+        <p class="field-hint">
+          A clear photo can help responders assess the situation faster.
+        </p>
+
+        <!-- Camera / permission status -->
+        <div class="camera-status" *ngIf="isRequestingCamera">
+          Requesting camera access…
+        </div>
+        <div class="camera-status camera-status--ok" *ngIf="cameraReady && !cameraError">
+          ✅ Camera access granted. You can take a photo directly.
+        </div>
+        <div class="camera-status camera-status--error" *ngIf="cameraError">
+          {{ cameraError }}
+        </div>
+
+        <div class="file-row">
+          <input
+            id="attachmentControl"
+            type="file"
+            accept="image/*"
+            capture="environment"
+            (change)="onFileSelected($event)"
+          />
+          <label for="attachmentControl" class="upload-btn">
+            📷 Take or upload a photo
+          </label>
+
+          <span class="file-name" *ngIf="selectedFileName">
+            {{ selectedFileName }}
+          </span>
+          <span class="file-name file-name--muted" *ngIf="!selectedFileName">
+            No file selected
+          </span>
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <footer class="form-footer">
+        <button
+          type="submit"
+          class="primary-btn"
+          [disabled]="form.invalid || isSubmitting"
+        >
+          <span *ngIf="!isSubmitting">Submit incident</span>
+          <span *ngIf="isSubmitting">Sending…</span>
+        </button>
+
+        <p class="disclaimer">
+          Only submit real incidents. Your report may be shared with local emergency services.
+        </p>
+      </footer>
+    </form>
+  </div>
+</div>
