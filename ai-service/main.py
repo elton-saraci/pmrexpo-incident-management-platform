@@ -4,10 +4,10 @@ import os
 from functools import lru_cache
 from typing import List, Dict, Any, Optional
 
-import httpx
 import torch
 from PIL import Image
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from openai import OpenAI
 from pydantic import BaseModel, Field
 from transformers import AutoImageProcessor, SiglipForImageClassification
 
@@ -59,7 +59,7 @@ def get_fake_image_model():
 
 def run_fake_image_inference(image_bytes: bytes) -> Dict[str, float]:
     """
-    Run inference with the Hugging Face fake-image model and return probabilities
+    Run inference with the fake-image model and return probabilities
     for 'fake/AI' vs. 'real/human'.
     """
     try:
@@ -156,7 +156,7 @@ async def detect_fake_image(file: UploadFile = File(...)):
 
 # ============================================
 # Incident prioritization / resource allocation (new schema)
-# via LLM (e.g. LLaMA through Ollama)
+# via Hugging Face Router (OpenAI-compatible chat API)
 # ============================================
 
 class GeoPoint(BaseModel):
@@ -175,11 +175,7 @@ class IncidentReport(BaseModel):
     id: str
     type: str = Field(..., description="e.g. wildfire, building_fire, flood")
     incident_geo_data: GeoPoint
-    severity_score: int = Field(..., ge=1, le=10, description="1=low, 10=extreme")
-    estimated_people_affected: int = Field(..., ge=0)
-    description: Optional[str] = Field(
-        None, description="Free-text description from dispatcher / caller"
-    )
+    severity_score: int = Field(..., ge=1, le=10, description="1=low, 5=extreme")
     fire_departments_nearby: List[FireDepartment]
 
 
@@ -191,8 +187,6 @@ class AssignedDepartment(BaseModel):
 
 class IncidentPriorityOutput(BaseModel):
     id: str
-    priority_score: float
-    priority_level: str
     assignments: List[AssignedDepartment]
 
 
@@ -205,99 +199,141 @@ class IncidentPrioritizationResponse(BaseModel):
 
 
 # --------------------------------------------
-# LLM call (e.g. Ollama in a separate container)
+# LLM via Hugging Face Router (Featherless provider)
 # --------------------------------------------
 
-LLM_ENDPOINT = os.getenv("LLM_ENDPOINT", "http://localhost:11434/api/generate")
-LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "llama3")
+HF_API_TOKEN = os.getenv("HF_API_TOKEN", "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")
+HF_LLM_MODEL_ID = os.getenv(
+    "HF_LLM_MODEL_ID",
+    "meta-llama/Meta-Llama-3.1-8B-Instruct",
+)
+
+if HF_API_TOKEN:
+    hf_client = OpenAI(
+        base_url="https://router.huggingface.co/featherless-ai/v1",
+        api_key=HF_API_TOKEN,
+    )
+else:
+    hf_client = None
 
 
 async def call_llm_for_prioritization(
     incidents: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """
-    Call a small LLM (e.g. LLaMA via Ollama) to compute priorities and resource allocation.
+    Call a Hugging Face-hosted LLM (via router / Inference Providers)
+    to compute priorities and resource allocation.
     The LLM is expected to return valid JSON.
     """
 
+    if hf_client is None:
+        raise RuntimeError(
+            "HF_API_TOKEN is not set. Please provide your Hugging Face API token "
+            "via the HF_API_TOKEN environment variable."
+        )
+
     system_prompt = """
-You are an expert disaster management AI assistant.
+    You are an expert disaster management AI assistant.
 
-You receive a list of incidents. Each incident contains:
-- id: string
-- type: string (e.g. wildfire, building_fire, flood)
-- incident_geo_data: { latitude: float, longitude: float }
-- severity_score: integer 1..10
-- estimated_people_affected: integer
-- description: optional free-text
-- fire_departments_nearby: list of:
-    {
-      "id": "FD-001",
-      "name": "Central Fire Station",
-      "location": { "latitude": float, "longitude": float },
-      "available_responders": int
-    }
-
-Your tasks:
-1. Assign a priority_score between 0 and 1 (float, 3 decimals) for each incident.
-2. Classify each incident into one of: "critical", "high", "medium", "low".
-   - Higher severity_score and more people_affected -> higher priority.
-   - If there are many available_responders nearby, the priority can be handled faster.
-   - Incidents with no nearby responders or very few resources should still be flagged as critical if severity is high.
-3. Decide how many responders to dispatch from which nearby fire departments.
-   - Never dispatch more responders from a department than its available_responders.
-   - You decide per incident independently (you don't have to coordinate between incidents).
-   - Prefer closer departments (same city/area) if multiple are available.
-   - For very low severity incidents, you may dispatch 0 or few responders.
-
-Return ONLY valid JSON with this exact structure:
-{
-  "incidents": [
-    {
-      "id": "string",
-      "priority_score": 0.0,
-      "priority_level": "critical | high | medium | low",
-      "assignments": [
+    You receive a list of incidents. Each incident contains:
+    - id: string
+    - type: string (e.g. wildfire, building_fire, flood)
+    - incident_geo_data: { latitude: float, longitude: float }
+    - severity_score: integer 1-5
+    - fire_departments_nearby: list of:
         {
-          "fire_department_id": "string",
-          "fire_department_name": "string",
-          "responders_dispatched": 0
+          "id": "FD-001",
+          "name": "Central Fire Station",
+          "location": { "latitude": float, "longitude": float },
+          "available_responders": int (responders who can be dispatched from a given department)
+        }
+
+    Your task for EACH incident:
+    1. Compute the TOTAL responders required as:
+       total_required = severity_score * 10
+
+    2. Distribute these responders across the fire_departments_nearby.
+
+       HARD CONSTRAINTS (must NEVER be violated):
+       - For every assignment:
+           0 <= responders_dispatched <= available_responders of that department.
+         Example: if available_responders = 9, responders_dispatched MUST be <= 9.
+       - Never invent new departments or responders.
+       - Do NOT assign more responders from a department than available_responders.
+
+    3. If the sum of all available_responders is GREATER THAN OR EQUAL TO total_required:
+       - You MUST dispatch exactly total_required responders in total, split over departments.
+       - Prefer closer departments (use the order of fire_departments_nearby as a proxy for "closer").
+
+    4. If the sum of all available_responders is LESS THAN total_required:
+       - Dispatch as many responders as possible (sum of responders_dispatched == total_available).
+       - Still obey the per-department constraint:
+           responders_dispatched <= available_responders for every department.
+
+    IMPORTANT:
+    - NEVER assign more responders from a department than its available_responders.
+    - NEVER assign negative responders.
+    - Never add extra departments.
+
+    Return ONLY valid JSON with this exact structure:
+    {
+      "incidents": [
+        {
+          "id": "string",
+          "assignments": [
+            {
+              "fire_department_id": "string",
+              "fire_department_name": "string",
+              "responders_dispatched": 0
+            }
+          ]
         }
       ]
     }
-  ]
-}
-No prose, no explanation, only JSON.
-"""
+    No prose, no explanation, only JSON.
+    """.strip()
 
-    user_payload = {
-        "incidents": incidents,
-    }
+    user_payload = {"incidents": incidents}
 
-    prompt = system_prompt + "\n\nINPUT:\n" + json.dumps(user_payload)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {
+            "role": "user",
+            "content": "Here is the incident input as JSON:\n" + json.dumps(user_payload),
+        },
+    ]
 
-    body = {
-        "model": LLM_MODEL_NAME,
-        "prompt": prompt,
-        "stream": False,
-    }
+    try:
+        # openai client is synchronous; calling it from async is fine for small load
+        response = hf_client.chat.completions.create(
+            model=HF_LLM_MODEL_ID,
+            messages=messages,
+            temperature=0.1,
+            max_tokens=512,
+        )
+    except Exception as e:
+        raise RuntimeError(f"Error calling Hugging Face router: {e}")
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        try:
-            resp = await client.post(LLM_ENDPOINT, json=body)
-            resp.raise_for_status()
-        except Exception as e:
-            raise RuntimeError(f"Error calling LLM endpoint {LLM_ENDPOINT}: {e}")
+    raw_text = (response.choices[0].message.content or "").strip()
 
-        data = resp.json()
+    # Strip ```json fences if the model adds them
+    if raw_text.startswith("```"):
+        lines = raw_text.splitlines()
+        # drop first line (``` or ```json)
+        lines = lines[1:]
+        # drop last line if it's ```
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        raw_text = "\n".join(lines).strip()
 
-    # Ollama standard format: {"response": "...", ...}
-    raw_text = data.get("response", "")
+    if not raw_text:
+        raise RuntimeError("LLM returned empty response text")
+
     try:
         parsed = json.loads(raw_text)
     except json.JSONDecodeError as e:
         raise RuntimeError(
-            f"LLM did not return valid JSON: {e}. Raw text: {raw_text[:200]}"
+            f"LLM did not return valid JSON: {e}. Raw text (first 200 chars): {raw_text[:200]}"
         )
 
     return parsed
@@ -346,8 +382,6 @@ async def prioritize_incidents(request: IncidentPrioritizationRequest):
 
             out = IncidentPriorityOutput(
                 id=str(item["id"]),
-                priority_score=float(item["priority_score"]),
-                priority_level=str(item["priority_level"]),
                 assignments=assignments,
             )
         except Exception as e:

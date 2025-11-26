@@ -1,36 +1,12 @@
 version: "3.9"
 
 services:
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    restart: unless-stopped
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    # For GPU (optional, if host supports it):
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - capabilities: ["gpu"]
-
   app:
-    build: ..
+    build: .
     container_name: disaster-ai-app
     restart: unless-stopped
-    depends_on:
-      - ollama
     ports:
       - "8000:8000"
     environment:
-      # Inside the Docker network, the app talks to Ollama via the service name "ollama"
-      LLM_ENDPOINT: "http://ollama:11434/api/generate"
+      LLM_ENDPOINT: "http://host.docker.internal:11434/api/generate"
       LLM_MODEL_NAME: "llama3:latest"
-    # If you prefer to mount the model instead of baking it into the image:
-    # volumes:
-    #   - ./models:/app/models:ro
-
-volumes:
-  ollama_data:
