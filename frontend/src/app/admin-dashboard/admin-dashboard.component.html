@@ -1,0 +1,105 @@
+<div class="dashboard">
+  <header class="dash-header">
+    <div>
+      <h1>Incident Operations Dashboard</h1>
+      <p class="subtitle">
+        Live view of reported incidents and fire departments around
+        <strong>Köln Messe</strong> (300 km radius).
+      </p>
+    </div>
+
+    <div class="header-controls">
+      <button class="refresh-btn" (click)="refresh()" [disabled]="isLoading">
+        ⟳ Refresh
+      </button>
+      <div class="meta">
+        <div>Reference: 📍 {{ referenceLat }}, {{ referenceLng }}</div>
+        <div *ngIf="lastUpdated">Last update: {{ lastUpdated | date: 'short' }}</div>
+      </div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="map-panel">
+      <app-jsmap
+        [lat]="referenceLat"
+        [lng]="referenceLng"
+        [zoom]="12"
+        [incidents]="incidents"
+        [fireDepartments]="fireDepartments"
+      >
+      </app-jsmap>
+
+      <div class="map-footer" *ngIf="isLoading">
+        Loading data from backend or mock sources…
+      </div>
+    </section>
+
+    <aside class="side-panel">
+      <section class="panel-section">
+        <h2>Fire Departments</h2>
+        <p class="hint">
+          Showing units within approximately 300 km of Köln Messe.
+        </p>
+
+        <ul class="fd-list">
+          <li *ngFor="let fd of fireDepartments" class="fd-item">
+            <div class="fd-main">
+              <div class="fd-name">{{ fd.name }}</div>
+              <div class="fd-meta">
+                <span>
+                  {{ distanceFromRef(fd) }} km from reference
+                </span>
+                <span class="coords">
+                  ({{ fd.location.latitude }}, {{ fd.location.longitude }})
+                </span>
+              </div>
+            </div>
+
+            <div
+              class="fd-status"
+              [ngClass]="{ occupied: isOccupied(fd), free: !isOccupied(fd) }"
+            >
+              <span *ngIf="isOccupied(fd)">Occupied – 0 responders</span>
+              <span *ngIf="!isOccupied(fd)">
+                {{ fd.available_responders }} responders available
+              </span>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <section class="panel-section">
+        <h2>Reported Incidents</h2>
+        <p class="hint">
+          Current incidents visible on the map. Click refresh to re-sync.
+        </p>
+
+        <ul class="incident-list">
+          <li *ngFor="let incident of incidents" class="incident-item">
+            <div class="badge" [ngClass]="incident.type">
+              {{ incident.type }}
+            </div>
+            <div class="incident-body">
+              <div class="incident-title">
+                {{ incident.description || 'No description provided' }}
+              </div>
+              <div class="incident-meta">
+                <span>
+                  📍 {{ incident.latitude }}, {{ incident.longitude }}
+                </span>
+                <span *ngIf="incident.severity_score">
+                  | Severity {{ incident.severity_score }}/5
+                </span>
+              </div>
+            </div>
+          </li>
+        </ul>
+
+        <p *ngIf="!incidents.length && !isLoading" class="empty">
+          No incidents reported in this area. Try again later.
+        </p>
+      </section>
+    </aside>
+  </main>
+</div>

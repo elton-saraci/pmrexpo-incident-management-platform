@@ -1,142 +1,192 @@
-import { Component, ViewChild, ElementRef, Input, SimpleChanges, Output, EventEmitter } from '@angular/core';
+import {
+  Component,
+  ViewChild,
+  ElementRef,
+  Input,
+  SimpleChanges,
+  Output,
+  EventEmitter,
+} from '@angular/core';
 import '@here/maps-api-for-javascript';
 import onResize from 'simple-element-resize-detector';
+
+import { FireDepartment, Incident } from '../admin-data.service';
 
 @Component({
   selector: 'app-jsmap',
   standalone: true,
   templateUrl: './jsmap.html',
-  styleUrls: ['./jsmap.scss']
+  styleUrls: ['./jsmap.scss'],
 })
 export class JsmapComponent {
+  // Default centre: Köln Messe
+  @Input() public zoom = 12;
+  @Input() public lat = 50.947086;
+  @Input() public lng = 6.982777;
 
-  @Input() public zoom = 13;
-  @Input() public lat = 52.5;
-  @Input() public lng = 13.4;
-  
-  @Output() notify = new EventEmitter();
-  
+  // Data to display
+  @Input() incidents: Incident[] = [];
+  @Input() fireDepartments: FireDepartment[] = [];
+
+  @Output() notify = new EventEmitter<H.map.ChangeEvent>();
+
   @ViewChild('map') mapDiv?: ElementRef;
-  
-  private heatMapLayer: H.map.layer.TileLayer;
-  private map?: H.Map;
 
+  private map?: H.Map;
   private timeoutHandle: any;
 
-  private minZoom = 5.8;
+  private incidentGroup?: H.map.Group;
+  private fireDeptGroup?: H.map.Group;
 
-  private data = [
-    { lat: 51.15, lng: 10.5 },
-    { lat: 51.2, lng: 10.5 },
-    { lat: 51.1, lng: 10.5 },
-    { lat: 51.15, lng: 10.55 },
-    { lat: 51.15, lng: 10.45 },
-    { lat: 48, lng: 10.5 },
-    { lat: 59.9245, lng: 10.954 }
-  ]
+  // Icons
+  private referenceIcon = new H.map.Icon(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 48" width="32" height="48">
+      <defs>
+        <linearGradient id="refGrad" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0" stop-color="#22c55e"/>
+          <stop offset="1" stop-color="#15803d"/>
+        </linearGradient>
+      </defs>
+      <path d="M16 0C9 0 4 5.7 4 12.8 4 23 16 36 16 36s12-13 12-23.2C28 5.7 23 0 16 0z" fill="url(#refGrad)"/>
+      <circle cx="16" cy="13.5" r="4.5" fill="#f0fdf4"/>
+    </svg>`
+  );
 
-  private icon = new H.map.Icon(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" fill="none" stroke="#0F1621" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path fill="#00AFAA" d="M24 4C16.26 4 10 10.26 10 18c0 9.74 14 26 14 26s14-16.26 14-26c0-7.74-6.26-14-14-14z"/>
-    <circle cx="24" cy="18" r="6" fill="#1D1E1F"/>
-  </svg>`);
+  private incidentIcon = new H.map.Icon(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 48" width="32" height="48">
+      <defs>
+        <linearGradient id="fireGrad" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0" stop-color="#f97316"/>
+          <stop offset="1" stop-color="#b91c1c"/>
+        </linearGradient>
+      </defs>
+      <path d="M16 0C9 0 4 5.7 4 12.8 4 23 16 36 16 36s12-13 12-23.2C28 5.7 23 0 16 0z" fill="url(#fireGrad)"/>
+      <circle cx="16" cy="14" r="5" fill="#fff3f0"/>
+    </svg>`
+  );
 
+  private fireDeptIcon = new H.map.Icon(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 48" width="32" height="48">
+      <path d="M16 0C9 0 4 5.7 4 12.8 4 23 16 36 16 36s12-13 12-23.2C28 5.7 23 0 16 0z" fill="#1d4ed8"/>
+      <rect x="9" y="13" width="14" height="9" fill="#eff6ff" rx="2" ry="2"/>
+      <path d="M10 22h12v2H10z" fill="#1e293b"/>
+    </svg>`
+  );
 
   ngAfterViewInit(): void {
-    const coords = {lat: 52, lng: 10.5};
-    const marker = new H.map.Marker(coords, { data: null, icon: this.icon });
-
     if (!this.map && this.mapDiv) {
-      // Instantiate a platform, default layers and a map as usual.
       const platform = new H.service.Platform({
-        apikey: 'zQHJRsNzyg7C-LUyhMYG64iRkinLVCD8RlJZccLX8z0'
+        apikey: 'zQHJRsNzyg7C-LUyhMYG64iRkinLVCD8RlJZccLX8z0',
       });
+
       const layers = platform.createDefaultLayers();
       const map = new H.Map(
         this.mapDiv.nativeElement,
-        // Add type assertion to the layers object...
-        // ...to avoid any Type errors during compilation.
         (layers as any).vector.normal.map,
         {
           pixelRatio: window.devicePixelRatio,
-          center: {lat: 51.15, lng: 10.5},
-          zoom: 5.8,
-        },
+          center: { lat: this.lat, lng: this.lng },
+          zoom: this.zoom,
+        }
       );
+
       onResize(this.mapDiv.nativeElement, () => {
         map.getViewPort().resize();
-      }); // Sets up the event listener to handle resizing
-
-      // Create a provider for a semi-transparent heat map
-      const heatmapProvider = new H.data.heatmap.Provider({
-        colors: new H.data.heatmap.Colors(
-          {
-            0: "blue",
-            0.5: "red",
-            1: "yellow",
-          },
-          true
-        ),
-        opacity: 0.9,
-        // Paint assumed values in regions where no data is available
-        assumeValues: false,
       });
-
-      // Add the data:
-      heatmapProvider.addData(this.data);
-
-      // Add a layer for the heatmap provider to the map
-      this.heatMapLayer = new H.map.layer.TileLayer(heatmapProvider);
-      map.addLayer(this.heatMapLayer);
-      map.addObject(marker);
 
       map.addEventListener('mapviewchange', (ev: H.map.ChangeEvent) => {
         this.notify.emit(ev);
       });
+
       new H.mapevents.Behavior(new H.mapevents.MapEvents(map));
 
+      // Reference marker at Köln Messe (or given lat/lng)
+      const refMarker = new H.map.Marker(
+        { lat: this.lat, lng: this.lng },
+        {
+          data: { kind: 'reference' },
+          icon: this.referenceIcon,
+        }
+      );
+      map.addObject(refMarker);
+
       this.map = map;
+
+      // Draw incidents + fire departments initially
+      this.renderDynamicData();
     }
   }
 
-  ngOnChanges(changes: SimpleChanges) {
-    console.log("hello")
+  ngOnChanges(changes: SimpleChanges): void {
     clearTimeout(this.timeoutHandle);
     this.timeoutHandle = setTimeout(() => {
-      if (this.map) {
-        if (changes['zoom'] !== undefined) {
-          console.log("IN MAP")
-          console.log(changes['zoom']);
-          this.map.setZoom(changes['zoom'].currentValue);
-        }
-        if (changes['lat'] !== undefined) {
-          this.map.setCenter({lat: changes['lat'].currentValue, lng: this.lng});
-        }
-        if (changes['lng'] !== undefined) {
-          this.map.setCenter({lat: this.lat, lng: changes['lng'].currentValue});
-        }
+      if (!this.map) {
+        return;
+      }
+
+      if (changes['zoom'] !== undefined) {
+        this.map.setZoom(changes['zoom'].currentValue);
+      }
+      if (changes['lat'] !== undefined || changes['lng'] !== undefined) {
+        this.map.setCenter({
+          lat: this.lat,
+          lng: this.lng,
+        });
+      }
+
+      if (changes['incidents'] || changes['fireDepartments']) {
+        this.renderDynamicData();
       }
     }, 100);
   }
 
-  changeToPins(pins: boolean) {
-    if(pins) {
-      this.map?.removeLayer(this.heatMapLayer);
-      this.addMarkers();
-    } else {
-      this.map.addLayer(this.heatMapLayer);
-      this.removeMarkers();
+  // ---- render incidents + fire departments ----
+
+  private renderDynamicData(): void {
+    if (!this.map) {
+      return;
     }
-  }
 
-  private addMarkers() {
-    this.data.forEach(point => {
-      this.map.addObject(new H.map.Marker(point, { data: null, icon: this.icon }))
-    })
-  }
+    // Remove old groups if they exist
+    if (this.incidentGroup) {
+      this.map.removeObject(this.incidentGroup);
+    }
+    if (this.fireDeptGroup) {
+      this.map.removeObject(this.fireDeptGroup);
+    }
 
-  private removeMarkers() {
-    this.map.getObjects().forEach(element => {
-      this.map.removeObject(element);
+    const incidentGroup = new H.map.Group();
+    const fdGroup = new H.map.Group();
+
+    this.incidents?.forEach((incident) => {
+      const marker = new H.map.Marker(
+        { lat: incident.latitude, lng: incident.longitude },
+        {
+          data: incident,
+          icon: this.incidentIcon,
+        }
+      );
+      incidentGroup.addObject(marker);
     });
+
+    this.fireDepartments?.forEach((fd) => {
+      const marker = new H.map.Marker(
+        {
+          lat: fd.location.latitude,
+          lng: fd.location.longitude,
+        },
+        {
+          data: fd,
+          icon: this.fireDeptIcon,
+        }
+      );
+      fdGroup.addObject(marker);
+    });
+
+    this.map.addObject(incidentGroup);
+    this.map.addObject(fdGroup);
+
+    this.incidentGroup = incidentGroup;
+    this.fireDeptGroup = fdGroup;
   }
 }
