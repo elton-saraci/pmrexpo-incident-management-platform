@@ -1,1 +1,87 @@
-<p>sensor-component works!</p>
+<!-- src/app/sensor-component/sensor-component.html -->
+<div class="sensor-page">
+    <div class="sensor-shell">
+      <header class="sensor-header">
+        <div>
+          <h1>Disaster Simulation Console</h1>
+          <p class="subtitle">
+            Trigger virtual incidents around
+            <strong>Köln Messe GmbH</strong> to test your monitoring pipeline.
+          </p>
+        </div>
+  
+        <div class="location-chip">
+          <span class="chip-label">Sensor anchor</span>
+          <span class="chip-value">
+            📍 50.947086, 6.982777
+          </span>
+        </div>
+      </header>
+  
+      <section class="status-bar" *ngIf="lastStatus !== 'idle'">
+        <div
+          class="status-pill"
+          [ngClass]="{
+            success: lastStatus === 'success',
+            error: lastStatus === 'error'
+          }"
+        >
+          <span *ngIf="lastStatus === 'success'">✅</span>
+          <span *ngIf="lastStatus === 'error'">⚠️</span>
+          <span>{{ lastMessage }}</span>
+        </div>
+  
+        <code class="payload-preview" *ngIf="lastPayload">
+          {{ lastPayload | json }}
+        </code>
+      </section>
+  
+      <section class="grid">
+        <article
+          class="disaster-card"
+          *ngFor="let disaster of disasters"
+          [ngClass]="disaster.accentClass"
+        >
+          <div class="card-header">
+            <div class="badge">{{ disaster.icon }}</div>
+            <div>
+              <h2>{{ disaster.label }}</h2>
+              <p class="card-subtitle">{{ disaster.description }}</p>
+            </div>
+          </div>
+  
+          <div class="severity-list">
+            <button
+              *ngFor="let sev of disaster.severityOptions"
+              class="severity-chip"
+              [disabled]="isSending"
+              (click)="simulate(disaster, sev)"
+            >
+              <div class="chip-top">
+                <span class="chip-label">{{ sev.label }}</span>
+                <span class="chip-score">
+                  Severity {{ sev.score }}/5
+                </span>
+              </div>
+              <p class="chip-desc">
+                {{ sev.description }}
+              </p>
+            </button>
+          </div>
+  
+          <footer class="card-footer">
+            <span class="hint">
+              Sends POST to
+              <code>/api/incidents/report</code>
+            </span>
+          </footer>
+        </article>
+      </section>
+  
+      <div class="loading-overlay" *ngIf="isSending">
+        <div class="spinner"></div>
+        <span>Dispatching incident to backend…</span>
+      </div>
+    </div>
+  </div>
+  
