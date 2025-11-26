@@ -3,3 +3,4 @@ flasgger
 pika
 gunicorn
 flask_cors
+requests

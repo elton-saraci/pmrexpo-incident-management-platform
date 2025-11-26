@@ -1,4 +1,4 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, DOCUMENT, OnInit, inject } from '@angular/core';
 import {
   ReactiveFormsModule,
@@ -68,7 +68,7 @@ export class UserComponent implements OnInit {
     }
   }
 
-  // Optional button handler in the UI
+  // Optional manual refresh button
   async onUseMyLocation() {
     await this.autoGetLocation();
   }
@@ -180,6 +180,7 @@ export class UserComponent implements OnInit {
               this.submitSuccess = false;
             }, 4000);
           } else {
+            // Non-201 but no HttpErrorResponse (rare)
             this.submitError =
               'Your report was sent, but the server responded with status ' +
               response.status +
@@ -187,10 +188,23 @@ export class UserComponent implements OnInit {
           }
           this.isSubmitting = false;
         },
-        error: (error) => {
+        error: (error: HttpErrorResponse) => {
           console.error(error);
-          this.submitError =
-            'Could not submit your incident. Please try again in a moment.';
+
+          // Special handling for fake_image_detected
+          if (
+            error.status === 400 &&
+            error.error &&
+            typeof error.error === 'object' &&
+            (error.error as any).error === 'fake_image_detected'
+          ) {
+            this.submitError =
+              'Your image was flagged as fake by the AI detector.';
+          } else {
+            this.submitError =
+              'Could not submit your incident. Please try again in a moment.';
+          }
+
           this.isSubmitting = false;
         },
       });
