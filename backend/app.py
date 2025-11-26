@@ -133,9 +133,6 @@ def report_incident_with_files():
               type: array
               items:
                 type: string
-            ai_reports:
-              type: object
-              description: Summary of AI detection results for uploaded files
       400:
         description: Missing or invalid parameters
     """
@@ -202,7 +199,7 @@ def report_incident_with_files():
                         f"Reason: {ai_reason}"
                     ),
                     "incident_id": incident_id,
-                    "ai_reports": ai_reports,
+                    # "ai_reports": ai_reports,
                 }), 400
 
             # --- File Saving (only for NON-fake images) ---
@@ -221,7 +218,7 @@ def report_incident_with_files():
                 """
                 INSERT INTO incident_attachments
                     (incident_id, file_name, mime_type, storage_path, file_size_bytes,
-                     uploaded_by, ai_is_fake, ai_confidence, ai_reason)
+                     uploaded_by)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -231,9 +228,6 @@ def report_incident_with_files():
                     fs_path,
                     file_size,
                     "public_user",
-                    is_fake,
-                    ai_confidence,
-                    ai_reason,
                 ),
             )
             saved_files.append(file_name)
@@ -243,7 +237,7 @@ def report_incident_with_files():
     return jsonify({
         "incident_id": incident_id,
         "saved_files": saved_files,
-        "ai_reports": ai_reports, 
+        # "ai_reports": ai_reports, 
     }), 201
 
 
