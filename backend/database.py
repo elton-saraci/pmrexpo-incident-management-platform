@@ -43,7 +43,7 @@ def create_tables():
         latitude REAL,
         longitude REAL,
         available_trucks INTEGER DEFAULT 0,
-        available_staff INTEGER DEFAULT 0
+        available_responders INTEGER DEFAULT 0
     );
     """
     )

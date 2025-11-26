@@ -118,7 +118,7 @@ def call_ai_resource_allocation(
     """
     fd_rows = db.execute(
         """
-        SELECT id, name, latitude, longitude, available_staff
+        SELECT id, name, latitude, longitude, available_responders
         FROM fire_departments
         """
     ).fetchall()
@@ -135,7 +135,7 @@ def call_ai_resource_allocation(
                 "latitude": row["latitude"],
                 "longitude": row["longitude"],
             },
-            "available_responders": row["available_staff"] or 0,
+            "available_responders": row["available_responders"] or 0,
         })
 
     payload = {
@@ -385,9 +385,9 @@ def report_incident_with_files():
                 db.execute(
                     """
                     UPDATE fire_departments
-                    SET available_staff = CASE
-                        WHEN available_staff >= ?
-                        THEN available_staff - ?
+                    SET available_responders = CASE
+                        WHEN available_responders >= ?
+                        THEN available_responders - ?
                         ELSE 0
                     END
                     WHERE id = ?
@@ -528,7 +528,7 @@ def get_all_fire_departments():
                 type: number
               available_trucks:
                 type: integer
-              available_staff:
+              available_responders:
                 type: integer
     """
     db = get_db()
@@ -542,7 +542,7 @@ def get_all_fire_departments():
             "latitude": r["latitude"],
             "longitude": r["longitude"],
             "available_trucks": r["available_trucks"],
-            "available_staff": r["available_staff"],
+            "available_responders": r["available_responders"],
         }
         for r in rows
     ]
@@ -582,7 +582,7 @@ def create_or_update_fire_department():
               type: number
             available_trucks:
               type: integer
-            available_staff:
+            available_responders:
               type: integer
     responses:
       201:
@@ -605,7 +605,7 @@ def create_or_update_fire_department():
     lat = data.get("latitude")
     lon = data.get("longitude")
     trucks = data.get("available_trucks", 0)
-    staff = data.get("available_staff", 0)
+    available_responders = data.get("available_responders", 0)
 
     if not name:
         return jsonify({"error": "name is required"}), 400
@@ -615,10 +615,10 @@ def create_or_update_fire_department():
         cur.execute(
             """
             INSERT INTO fire_departments
-                (name, city, latitude, longitude, available_trucks, available_staff)
+                (name, city, latitude, longitude, available_trucks, available_responders)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (name, city, lat, lon, trucks, staff),
+            (name, city, lat, lon, trucks, available_responders),
         )
         db.commit()
         new_id = cur.lastrowid
@@ -637,7 +637,7 @@ def create_or_update_fire_department():
                     "latitude": row["latitude"],
                     "longitude": row["longitude"],
                     "available_trucks": row["available_trucks"],
-                    "available_staff": row["available_staff"],
+                    "available_responders": row["available_responders"],
                 }
             ),
             201,
@@ -656,10 +656,10 @@ def create_or_update_fire_department():
         """
         UPDATE fire_departments
         SET name = ?, city = ?, latitude = ?, longitude = ?,
-            available_trucks = ?, available_staff = ?
+            available_trucks = ?, available_responders = ?
         WHERE id = ?
         """,
-        (name, city, lat, lon, trucks, staff, fd_id),
+        (name, city, lat, lon, trucks, available_responders, fd_id),
     )
     db.commit()
 
@@ -676,7 +676,7 @@ def create_or_update_fire_department():
             "latitude": row["latitude"],
             "longitude": row["longitude"],
             "available_trucks": row["available_trucks"],
-            "available_staff": row["available_staff"],
+            "available_responders": row["available_responders"],
         }
     )
 
@@ -874,7 +874,7 @@ def update_incident_status(incident_id: int):
             db.execute(
                 """
                 UPDATE fire_departments
-                SET available_staff = available_staff + ?
+                SET available_responders = available_responders + ?
                 WHERE id = ?
                 """,
                 (dispatched, fd_id),

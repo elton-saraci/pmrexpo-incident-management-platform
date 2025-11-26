@@ -85,8 +85,8 @@ export class AdminDashboardComponent implements OnInit {
     return this.dataService.distanceKm(
       this.referenceLat,
       this.referenceLng,
-      fd.location.latitude,
-      fd.location.longitude
+      fd.latitude,
+      fd.longitude
     );
   }
 }

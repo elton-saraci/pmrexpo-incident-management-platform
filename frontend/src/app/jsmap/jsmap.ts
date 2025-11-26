@@ -100,16 +100,6 @@ export class JsmapComponent {
 
       new H.mapevents.Behavior(new H.mapevents.MapEvents(map));
 
-      // Reference marker at Köln Messe (or given lat/lng)
-      const refMarker = new H.map.Marker(
-        { lat: this.lat, lng: this.lng },
-        {
-          data: { kind: 'reference' },
-          icon: this.referenceIcon,
-        }
-      );
-      map.addObject(refMarker);
-
       this.map = map;
 
       // Draw incidents + fire departments initially
@@ -172,8 +162,8 @@ export class JsmapComponent {
     this.fireDepartments?.forEach((fd) => {
       const marker = new H.map.Marker(
         {
-          lat: fd.location.latitude,
-          lng: fd.location.longitude,
+          lat: fd.latitude,
+          lng: fd.longitude,
         },
         {
           data: fd,

@@ -8,10 +8,8 @@ import { catchError, map, of, Observable } from 'rxjs';
 export interface FireDepartment {
   id: string;
   name: string;
-  location: {
-    latitude: number;
-    longitude: number;
-  };
+  latitude: number;
+  longitude: number;
   available_responders: number;
 }
 
@@ -43,7 +41,7 @@ export class AdminDataService {
   ): Observable<FireDepartment[]> {
     // If your backend later accepts query params, you can add them here.
     return this.http
-      .get<FireDepartment[]>(`${this.baseUrl}/fire-departments`)
+      .get<FireDepartment[]>(`${this.baseUrl}/fire_departments`)
       .pipe(
         map((items) => items ?? []),
         catchError((err) => {
@@ -59,7 +57,7 @@ export class AdminDataService {
     radiusKm: number = 300
   ): Observable<Incident[]> {
     return this.http
-      .get<Incident[]>(`${this.baseUrl}/incidents`)
+      .get<Incident[]>(`${this.baseUrl}/incidents/report`)
       .pipe(
         map((items) => items ?? []),
         catchError((err) => {
@@ -76,37 +74,33 @@ export class AdminDataService {
       {
         id: 'FD-001',
         name: 'Köln Innenstadt Fire Station',
-        location: {
           latitude: 50.9382,
           longitude: 6.9599,
-        },
         available_responders: 9,
       },
       {
         id: 'FD-002',
         name: 'Köln-Deutz Fire Station',
-        location: {
-          latitude: 50.9409,
-          longitude: 6.9793,
-        },
+         latitude: 50.9409,
+         longitude: 6.9793,
         available_responders: 0, // occupied
       },
       {
         id: 'FD-003',
         name: 'Köln-Mülheim Fire Station',
-        location: {
+
           latitude: 50.969,
           longitude: 7.0,
-        },
+
         available_responders: 4,
       },
       {
         id: 'FD-004',
         name: 'Köln-Ehrenfeld Fire Station',
-        location: {
+
           latitude: 50.9495,
           longitude: 6.9083,
-        },
+
         available_responders: 2,
       },
     ];
