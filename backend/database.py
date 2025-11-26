@@ -37,7 +37,7 @@ def create_tables():
     );
     """)
 
-    # --- sensor_readings table ---
+       # --- sensor_readings table ---
     cur.execute("""
     CREATE TABLE IF NOT EXISTS sensor_readings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,6 +46,8 @@ def create_tables():
         metric_type TEXT,                -- temperature, smoke_density, power_load, etc.
         value REAL,
         unit TEXT,
+        severity REAL,                   -- NEW: AI/logic severity score for this reading (0–10 or similar)
+        description TEXT,                -- NEW: short human-readable description / context
         timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(incident_id) REFERENCES incidents(id)
             ON DELETE SET NULL

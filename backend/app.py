@@ -1,12 +1,15 @@
 from flask import Flask, request, jsonify, send_from_directory, g
 from werkzeug.utils import secure_filename
+from flask_cors import CORS
 import os
 import sqlite3
+import math
 from flasgger import Swagger
 
 DB_NAME = "crisis_ai.db"
 UPLOAD_FOLDER = "uploads"
 app = Flask(__name__)
+CORS(app, supports_credentials=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
 
@@ -293,14 +296,67 @@ def create_fire_department():
 @app.route("/api/fire_departments", methods=["GET"])
 def list_fire_departments():
     """
-    List all fire departments.
+    List fire departments, optionally ranked by distance to an incident
+    ---
+    parameters:
+      - in: query
+        name: mode
+        type: string
+        required: false
+        enum: [all, nearest]
+        description: >
+          all (default) returns all fire departments.
+          nearest returns fire departments ranked by distance to a given incident.
+      - in: query
+        name: incident_id
+        type: integer
+        required: false
+        description: Required when mode=nearest. ID of the incident to measure distance from.
+      - in: query
+        name: limit
+        type: integer
+        required: false
+        description: Optional limit on number of fire departments to return (used with mode=nearest).
+    responses:
+      200:
+        description: A list of fire departments with mode = all and mode=nearest&incident_id=3&limit=5
+        schema:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+              city:
+                type: string
+              latitude:
+                type: number
+              longitude:
+                type: number
+              available_trucks:
+                type: integer
+              available_staff:
+                type: integer
+              distance_km:
+                type: number
+                description: >
+                  Distance from the given incident in kilometers (only present when mode=nearest).
+      400:
+        description: Invalid parameters (e.g. missing incident_id for mode=nearest)
+      404:
+        description: Incident not found when mode=nearest
     """
     db = get_db()
-    rows = db.execute("SELECT * FROM fire_departments").fetchall()
+    mode = request.args.get("mode", "all")
+    incident_id = request.args.get("incident_id", type=int)
+    limit = request.args.get("limit", type=int)
 
-    fds = []
-    for r in rows:
-        fds.append({
+    # Fetch all fire departments first
+    rows = db.execute("SELECT * FROM fire_departments").fetchall()
+    departments = [
+        {
             "id": r["id"],
             "name": r["name"],
             "city": r["city"],
@@ -308,9 +364,69 @@ def list_fire_departments():
             "longitude": r["longitude"],
             "available_trucks": r["available_trucks"],
             "available_staff": r["available_staff"],
-        })
-    return jsonify(fds)
+        }
+        for r in rows
+    ]
 
+    # Mode 1: just return all
+    if mode == "all":
+        # distance_km not included here
+        return jsonify(departments)
+
+    # Mode 2: nearest to an incident
+    if mode == "nearest":
+        if incident_id is None:
+            return jsonify({"error": "incident_id is required when mode=nearest"}), 400
+
+        inc_row = db.execute(
+            "SELECT latitude, longitude FROM incidents WHERE id = ?",
+            (incident_id,),
+        ).fetchone()
+
+        if not inc_row:
+            return jsonify({"error": "Incident not found"}), 404
+
+        inc_lat = inc_row["latitude"]
+        inc_lon = inc_row["longitude"]
+
+        # Helper: haversine distance
+        def haversine_km(lat1, lon1, lat2, lon2):
+            # approximate radius of earth in km
+            R = 6371.0
+            phi1 = math.radians(lat1)
+            phi2 = math.radians(lat2)
+            dphi = math.radians(lat2 - lat1)
+            dlambda = math.radians(lon2 - lon1)
+
+            a = (
+                math.sin(dphi / 2) ** 2
+                + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+            )
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+            return R * c
+
+        # Add distance_km to each department
+        for d in departments:
+            if d["latitude"] is not None and d["longitude"] is not None:
+                d["distance_km"] = round(
+                    haversine_km(inc_lat, inc_lon, d["latitude"], d["longitude"]), 2
+                )
+            else:
+                d["distance_km"] = None
+
+        # Sort by distance (None goes last)
+        departments.sort(
+            key=lambda d: float("inf") if d["distance_km"] is None else d["distance_km"]
+        )
+
+        # Apply limit if provided
+        if limit is not None and limit > 0:
+            departments = departments[:limit]
+
+        return jsonify(departments)
+
+    # Fallback: unknown mode
+    return jsonify({"error": "Invalid mode. Use 'all' or 'nearest'."}), 400
 
 @app.route("/api/fire_departments/<int:fd_id>", methods=["GET"])
 def get_fire_department(fd_id):
@@ -400,6 +516,99 @@ def delete_fire_department(fd_id):
         return jsonify({"error": "Fire department not found"}), 404
 
     return jsonify({"deleted": True})
+
+
+@app.route("/api/sensors", methods=["GET"])
+def list_sensor_readings():
+    """
+ List sensor readings with optional filters
+---
+parameters:
+  - in: query
+    name: incident_id
+    type: integer
+    required: false
+    description: Filter readings only for this incident.
+  - in: query
+    name: limit
+    type: integer
+    required: false
+    description: Limit number of results (default 50).
+responses:
+  200:
+    description: A list of sensor readings
+    schema:
+      type: array
+      items:
+        type: object
+        properties:
+          id:
+            type: integer
+          sensor_id:
+            type: string
+          incident_id:
+            type: integer
+            nullable: true
+          metric_type:
+            type: string
+          value:
+            type: number
+          unit:
+            type: string
+          severity:
+            type: number
+            description: >
+              A severity score for this sensor reading, typically 0–10.
+              Can be assigned by the sensor, rule-based logic, or AI.
+          description:
+            type: string
+            description: Short AI/human-readable explanation of the sensor reading.
+          timestamp:
+            type: string
+            format: date-time
+
+    """
+    db = get_db()
+    incident_id = request.args.get("incident_id", type=int)
+    limit = request.args.get("limit", type=int)
+    if not limit or limit <= 0:
+        limit = 50
+
+    if incident_id is not None:
+        rows = db.execute(
+            """
+            SELECT * FROM sensor_readings
+            WHERE incident_id = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            (incident_id, limit),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """
+            SELECT * FROM sensor_readings
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    readings = []
+    for r in rows:
+        readings.append({
+            "id": r["id"],
+            "sensor_id": r["sensor_id"],
+            "incident_id": r["incident_id"],
+            "metric_type": r["metric_type"],
+            "value": r["value"],
+            "unit": r["unit"],
+            "severity": r["severity"],          
+            "description": r["description"],    
+            "timestamp": r["timestamp"],
+        })
+
+    return jsonify(readings)
 
 if __name__ == "__main__":
     app.run(debug=True, use_reloader=False)
