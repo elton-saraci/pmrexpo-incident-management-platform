@@ -219,7 +219,7 @@ def report_incident_with_files():
                 INSERT INTO incident_attachments
                     (incident_id, file_name, mime_type, storage_path, file_size_bytes,
                      uploaded_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     incident_id,
