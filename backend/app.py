@@ -692,53 +692,35 @@ def list_sensor_readings():
       400:
         description: Missing or invalid parameters
     """
+    
     db = get_db()
     cur = db.cursor()
-    # Ensure this endpoint correctly consumes JSON
-    try:
-        data = request.get_json(force=True)
-    except Exception:
-        # Handle case where request body isn't valid JSON
-        return jsonify({"error": "Request must contain valid JSON data"}), 400
 
-    desc = data.get("description", "Sensors")
-    inc_type = data.get("type")
-    lat = data.get("latitude")
-    lon = data.get("longitude")
-    severity_score = data.get("severity_score", 0)
+    inc_type = request.form.get("type")
+    lat = request.form.get("latitude")
+    lon = request.form.get("longitude")
+    desc = request.form.get("description")
+    severity_score = request.form.get("severity_score")
 
     if not inc_type or lat is None or lon is None:
-        # Check if JSON keys are present
-        return jsonify({"error": "type, latitude, longitude are required in JSON body"}), 400
+        return jsonify({"error": "type, latitude, longitude are required as form fields"}), 400
 
     try:
-        # Ensure coordinates are numeric
         lat = float(lat)
         lon = float(lon)
-    except (ValueError, TypeError):
+    except ValueError:
         return jsonify({"error": "latitude and longitude must be numeric"}), 400
 
     # 1) Create incident
-    # NOTE: You had a trailing comma after severity_score in your SQL,
-    # which is likely another error if you're using an older SQLite or SQL version.
-    # The SQL is fixed below.
-    try:
-        cur.execute(
-            """
-            INSERT INTO incidents (type, description, latitude, longitude, severity_score)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (inc_type, desc, lat, lon, severity_score),
-        )
-        db.commit()
-        incident_id = cur.lastrowid
-    except sqlite3.OperationalError as e:
-        # Catches the potential error from the trailing comma in the original SQL
-        print(f"SQL Error: {e}")
-        return jsonify({"error": "Database error during incident creation."}), 500
-
-
-    # 2) Remove all file/AI detection logic (steps 2 and 3) here for a pure sensor endpoint.
+    cur.execute(
+        """
+        INSERT INTO incidents (type, description, latitude, longitude, severity_score)
+        # VALUES (?, ?, ?, ?, ?)
+        """,
+        (inc_type, desc, lat, lon, severity_score),
+    )
+    db.commit()
+    incident_id = cur.lastrowid
     
     return jsonify({
         "incident_id": incident_id,
