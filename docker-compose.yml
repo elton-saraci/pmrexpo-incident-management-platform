@@ -1,0 +1,48 @@
+version: "3.9"
+
+services:
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: ai-service
+    ports:
+      - "8081:8081"      # host:container
+    networks:
+      - hackathon-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: backend
+    depends_on:
+      - ai-service
+    ports:
+      - "8080:8080"      # host:container
+    environment:
+      # URL the backend uses to talk to the AI service
+      AI_SERVICE_URL: "http://ai-service:8081"
+    networks:
+      - hackathon-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    depends_on:
+      - backend
+    ports:
+      # Angular app (served via Nginx in the Dockerfile) → container port 80
+      # exposed as 4200 on the host
+      - "4200:80"
+    environment:
+      # URL the frontend uses to call the backend
+      BACKEND_URL: "http://backend:8080"
+    networks:
+      - hackathon-net
+
+networks:
+  hackathon-net:
+    driver: bridge
