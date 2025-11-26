@@ -165,7 +165,7 @@ def report_incident_with_files():
 @app.route("/api/incidents/report", methods=["GET"])
 def list_incidents():
     """
-    List incidents with optional status filter
+    List incidents with optional status filter, including attachments (if any)
     ---
     parameters:
       - in: query
@@ -175,7 +175,7 @@ def list_incidents():
         description: Filter by status (open, in_progress, resolved)
     responses:
       200:
-        description: A list of incidents
+        description: A list of incidents (each with attachments array)
         schema:
           type: array
           items:
@@ -200,9 +200,30 @@ def list_incidents():
               created_at:
                 type: string
                 format: date-time
+              attachments:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    file_name:
+                      type: string
+                    mime_type:
+                      type: string
+                    file_size_bytes:
+                      type: integer
+                    created_at:
+                      type: string
+                      format: date-time
+                    url:
+                      type: string
+                      description: URL to download / display the file
     """
     status = request.args.get("status")
     db = get_db()
+
+    # 1) Get incidents
     if status:
         rows = db.execute(
             "SELECT * FROM incidents WHERE status = ? ORDER BY created_at DESC",
@@ -214,7 +235,36 @@ def list_incidents():
         ).fetchall()
 
     incidents = []
+
+    # 2) For each incident, fetch attachments and build URLs
     for r in rows:
+        incident_id = r["id"]
+
+        att_rows = db.execute(
+            """
+            SELECT id, file_name, mime_type, file_size_bytes, created_at
+            FROM incident_attachments
+            WHERE incident_id = ?
+            ORDER BY created_at DESC
+            """,
+            (incident_id,),
+        ).fetchall()
+
+        attachments = []
+        for a in att_rows:
+            file_name = a["file_name"]
+            # e.g. http://127.0.0.1:5000/uploads/<file_name>
+            file_url = request.host_url.rstrip("/") + "/uploads/" + file_name
+
+            attachments.append({
+                "id": a["id"],
+                "file_name": file_name,
+                "mime_type": a["mime_type"],
+                "file_size_bytes": a["file_size_bytes"],
+                "created_at": a["created_at"],
+                "url": file_url,
+            })
+
         incidents.append({
             "id": r["id"],
             "type": r["type"],
@@ -225,8 +275,11 @@ def list_incidents():
             "priority_score": r["priority_score"],
             "priority_explanation": r["priority_explanation"],
             "created_at": r["created_at"],
+            "attachments": attachments,  # <- here!
         })
+
     return jsonify(incidents)
+
 
 # --- FIRE DEPARTMENTS CRUD ENDPOINTS ---
 
@@ -609,6 +662,15 @@ responses:
         })
 
     return jsonify(readings)
+
+@app.route("/uploads/<path:filename>", methods=["GET"])
+def serve_file(filename):
+    """
+    Serve uploaded files by filename.
+    This lets the frontend use the 'url' field in incident attachments.
+    """
+    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
+
 
 if __name__ == "__main__":
     app.run(debug=True, use_reloader=False)
