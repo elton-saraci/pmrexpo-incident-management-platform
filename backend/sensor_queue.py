@@ -26,7 +26,7 @@ def process_message(body: bytes):
     data = json.loads(body.decode("utf-8"))
 
     sensor_id = data["sensor_id"]
-    incident_id = data.get("incident_id")  # can be None
+    incident_id = data.get("incident_id") 
     metric_type = data.get("metric_type")
     value = data.get("value")
     unit = data.get("unit")
