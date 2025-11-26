@@ -2,15 +2,16 @@ from flask import Flask, request, jsonify, send_from_directory, g
 from werkzeug.utils import secure_filename
 import os
 import sqlite3
+from flasgger import Swagger
 
 DB_NAME = "crisis_ai.db"
 UPLOAD_FOLDER = "uploads"
-
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
 app = Flask(__name__)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
+
+swagger = Swagger(app)
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
 # --- DB CONNECTION HELPERS ---
@@ -35,73 +36,56 @@ def close_db(exc):
 
 # --- INCIDENT CRUD ENDPOINTS ---
 
-@app.route("/api/incidents", methods=["POST"])
-def create_incident():
-    """
-    JSON-only version:
-    {
-      "type": "forest_fire",
-      "description": "Smoke seen near road",
-      "latitude": 48.123,
-      "longitude": 11.567
-    }
-    """
-    data = request.get_json(force=True)
-    inc_type = data.get("type")
-    lat = data.get("latitude")
-    lon = data.get("longitude")
-    desc = data.get("description")
-
-    if not inc_type or lat is None or lon is None:
-        return jsonify({"error": "type, latitude, longitude are required"}), 400
-
-    db = get_db()
-    cur = db.cursor()
-    cur.execute(
-        """
-        INSERT INTO incidents (type, description, latitude, longitude)
-        VALUES (?, ?, ?, ?)
-        """,
-        (inc_type, desc, lat, lon),
-    )
-    db.commit()
-    incident_id = cur.lastrowid
-
-    return jsonify({"id": incident_id}), 201
-
-
-@app.route("/api/incidents", methods=["GET"])
-def list_incidents():
-    status = request.args.get("status")
-    db = get_db()
-    if status:
-        rows = db.execute(
-            "SELECT * FROM incidents WHERE status = ? ORDER BY created_at DESC",
-            (status,),
-        ).fetchall()
-    else:
-        rows = db.execute(
-            "SELECT * FROM incidents ORDER BY created_at DESC"
-        ).fetchall()
-
-    incidents = []
-    for r in rows:
-        incidents.append({
-            "id": r["id"],
-            "type": r["type"],
-            "description": r["description"],
-            "latitude": r["latitude"],
-            "longitude": r["longitude"],
-            "status": r["status"],
-            "priority_score": r["priority_score"],
-            "priority_explanation": r["priority_explanation"],
-            "created_at": r["created_at"],
-        })
-    return jsonify(incidents)
-
 @app.route("/api/incidents/report", methods=["POST"])
 def report_incident_with_files():
-    
+        
+    """
+    Report a new incident with optional file attachments
+    ---
+    consumes:
+      - multipart/form-data
+    parameters:
+      - in: formData
+        name: type
+        type: string
+        required: true
+        description: Type of incident (forest_fire, blackout, flood, etc.)
+      - in: formData
+        name: latitude
+        type: number
+        required: true
+        description: Latitude of the incident
+      - in: formData
+        name: longitude
+        type: number
+        required: true
+        description: Longitude of the incident
+      - in: formData
+        name: description
+        type: string
+        required: false
+        description: Free-text description of the incident
+      - in: formData
+        name: files
+        type: file
+        required: false
+        description: One or more files (images, PDFs, etc.)
+        multiple: true
+    responses:
+      201:
+        description: Incident created successfully
+        schema:
+          type: object
+          properties:
+            incident_id:
+              type: integer
+            saved_files:
+              type: array
+              items:
+                type: string
+      400:
+        description: Missing or invalid parameters
+    """
     db = get_db()
     cur = db.cursor()
 
@@ -175,22 +159,110 @@ def report_incident_with_files():
     }), 201
 
 
+@app.route("/api/incidents/report", methods=["GET"])
+def list_incidents():
+    """
+    List incidents with optional status filter
+    ---
+    parameters:
+      - in: query
+        name: status
+        type: string
+        required: false
+        description: Filter by status (open, in_progress, resolved)
+    responses:
+      200:
+        description: A list of incidents
+        schema:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+              type:
+                type: string
+              description:
+                type: string
+              latitude:
+                type: number
+              longitude:
+                type: number
+              status:
+                type: string
+              priority_score:
+                type: number
+              priority_explanation:
+                type: string
+              created_at:
+                type: string
+                format: date-time
+    """
+    status = request.args.get("status")
+    db = get_db()
+    if status:
+        rows = db.execute(
+            "SELECT * FROM incidents WHERE status = ? ORDER BY created_at DESC",
+            (status,),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT * FROM incidents ORDER BY created_at DESC"
+        ).fetchall()
+
+    incidents = []
+    for r in rows:
+        incidents.append({
+            "id": r["id"],
+            "type": r["type"],
+            "description": r["description"],
+            "latitude": r["latitude"],
+            "longitude": r["longitude"],
+            "status": r["status"],
+            "priority_score": r["priority_score"],
+            "priority_explanation": r["priority_explanation"],
+            "created_at": r["created_at"],
+        })
+    return jsonify(incidents)
+
 # --- FIRE DEPARTMENTS CRUD ENDPOINTS ---
 
 @app.route("/api/fire_departments", methods=["POST"])
 def create_fire_department():
     """
-    Create a new fire department.
-
-    JSON body:
-    {
-      "name": "Koblenz Central Station",
-      "city": "Koblenz",
-      "latitude": 50.356,
-      "longitude": 7.588,
-      "available_trucks": 3,
-      "available_staff": 18
-    }
+    Create a new fire department
+    ---
+    consumes:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            name:
+              type: string
+            city:
+              type: string
+            latitude:
+              type: number
+            longitude:
+              type: number
+            available_trucks:
+              type: integer
+            available_staff:
+              type: integer
+    responses:
+      201:
+        description: Fire department created
+        schema:
+          type: object
+          properties:
+            id:
+              type: integer
+      400:
+        description: Invalid input data
     """
     data = request.get_json(force=True)
     name = data.get("name")
