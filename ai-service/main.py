@@ -252,23 +252,8 @@ async def call_llm_for_prioritization(
     1. Compute the TOTAL responders required as:
        total_required = severity_score * 10
 
-    2. Distribute these responders across the fire_departments_nearby.
-
-       HARD CONSTRAINTS (must NEVER be violated):
-       - For every assignment:
-           0 <= responders_dispatched <= available_responders of that department.
-         Example: if available_responders = 9, responders_dispatched MUST be <= 9.
-       - Never invent new departments or responders.
-       - Do NOT assign more responders from a department than available_responders.
-
-    3. If the sum of all available_responders is GREATER THAN OR EQUAL TO total_required:
-       - You MUST dispatch exactly total_required responders in total, split over departments.
-       - Prefer closer departments (use the order of fire_departments_nearby as a proxy for "closer").
-
-    4. If the sum of all available_responders is LESS THAN total_required:
-       - Dispatch as many responders as possible (sum of responders_dispatched == total_available).
-       - Still obey the per-department constraint:
-           responders_dispatched <= available_responders for every department.
+    2. Distribute these responders across the fire_departments_nearby. if the nearest fire_department_id does not 
+    have enough available_responders, get the rest of them from second nearest fire_department.
 
     IMPORTANT:
     - NEVER assign more responders from a department than its available_responders.
@@ -338,10 +323,6 @@ async def call_llm_for_prioritization(
 
     return parsed
 
-
-# --------------------------------------------
-# Endpoint: prioritize incidents (LLM-based)
-# --------------------------------------------
 
 @app.post(
     "/resource-allocation",
