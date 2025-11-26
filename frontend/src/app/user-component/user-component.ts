@@ -29,8 +29,7 @@ export class UserComponent {
   form = new FormGroup({
     type: new FormControl("", Validators.required),
     description: new FormControl(""),
-    coordinates: new FormControl(""),
-    attachments: new FormControl("")
+    attachments: new FormControl(null)
   });
 
   public async getCoordinates() {
@@ -73,18 +72,40 @@ export class UserComponent {
 
     console.log("going to post");
 
-    let payload = {
-      type: this.form.controls.type.value,
-      latitude: this.latitude,
-      longitude: this.longitude,
-      description: this.form.controls.description.value
+    // let payload = {
+    //   type: this.form.controls.type.value,
+    //   latitude: this.latitude,
+    //   longitude: this.longitude,
+    //   description: this.form.controls.description.value
+    // }
+
+    // if (this.form.controls.attachments.value) {
+    //   payload["files"] = [this.form.controls.attachments.value]
+    // }
+
+    const formData = new FormData();
+    // Append form fields as strings
+    formData.append("type", this.form.controls.type.value as string);
+    formData.append("latitude", this.latitude.toString());
+    formData.append("longitude", this.longitude.toString());
+    // Optional fields
+    if (this.form.controls.description.value) {
+      formData.append("description", this.form.controls.description.value);
+    }
+    // Attachments (assuming the 'attachments' control holds a File object or similar)
+    // NOTE: This assumes 'attachments' is correctly bound to a file input change event
+    // that stores the actual File object, not just a string path.
+    const file: File = (<HTMLInputElement>document.getElementById("attachmentControl")).files[0];
+    console.log(file);
+    if (file instanceof File) {
+      console.log("appending file");
+      // The second argument 'file.name' is optional but good practice
+      formData.append("files", file, file.name);
     }
 
-    if (this.form.controls.attachments.value) {
-      payload["files"] = [this.form.controls.attachments.value]
-    }
+    console.log(formData);
 
-    this.httpClient.post(url, payload).pipe(catchError(error => of(error))).subscribe(result => {console.log(result)});
+    this.httpClient.post(url, formData).pipe(catchError(error => of(error))).subscribe(result => {console.log(result)});
 
     this.httpClient.get(url).pipe(first()).subscribe(response => {
       console.log(response);
