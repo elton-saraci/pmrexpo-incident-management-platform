@@ -202,7 +202,7 @@ class IncidentPrioritizationResponse(BaseModel):
 # LLM via Hugging Face Router (Featherless provider)
 # --------------------------------------------
 
-HF_API_TOKEN = os.getenv("HF_API_TOKEN", "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")
+HF_API_TOKEN = os.getenv("HF_API_TOKEN", "")
 HF_LLM_MODEL_ID = os.getenv(
     "HF_LLM_MODEL_ID",
     "meta-llama/Meta-Llama-3.1-8B-Instruct",
