@@ -31,8 +31,7 @@ def create_tables():
         latitude REAL NOT NULL,
         longitude REAL NOT NULL,
         status TEXT DEFAULT 'open',      -- open, in_progress, resolved
-        priority_score REAL DEFAULT 0.0, -- computed by AI
-        priority_explanation TEXT,       -- transparent reasoning
+        severity_score REAL DEFAULT 0.0, -- computed by AI
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     """)

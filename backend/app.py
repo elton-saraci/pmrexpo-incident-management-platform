@@ -121,6 +121,11 @@ def report_incident_with_files():
         required: false
         description: One or more files (images, PDFs, etc.)
         multiple: true
+      - in: formData
+        name: severity
+        type: number
+        required: false
+        description: Severity of the incident
     responses:
       201:
         description: Incident created successfully
@@ -272,10 +277,8 @@ def list_incidents():
                 type: number
               status:
                 type: string
-              priority_score:
+              severity_score:
                 type: number
-              priority_explanation:
-                type: string
               created_at:
                 type: string
                 format: date-time
@@ -351,8 +354,7 @@ def list_incidents():
             "latitude": r["latitude"],
             "longitude": r["longitude"],
             "status": r["status"],
-            "priority_score": r["priority_score"],
-            "priority_explanation": r["priority_explanation"],
+            "severity_score": r["severity_score"],
             "created_at": r["created_at"],
             "attachments": attachments,  
         })
@@ -650,97 +652,165 @@ def delete_fire_department(fd_id):
     return jsonify({"deleted": True})
 
 
-@app.route("/api/sensors", methods=["GET"])
+@app.route("/api/sensors", methods=["POST"])
 def list_sensor_readings():
     """
- List sensor readings with optional filters
----
-parameters:
-  - in: query
-    name: incident_id
-    type: integer
-    required: false
-    description: Filter readings only for this incident.
-  - in: query
-    name: limit
-    type: integer
-    required: false
-    description: Limit number of results (default 50).
-responses:
-  200:
-    description: A list of sensor readings
-    schema:
-      type: array
-      items:
-        type: object
-        properties:
-          id:
-            type: integer
-          sensor_id:
-            type: string
-          incident_id:
-            type: integer
-            nullable: true
-          metric_type:
-            type: string
-          value:
-            type: number
-          unit:
-            type: string
-          severity:
-            type: number
-            description: >
-              A severity score for this sensor reading, typically 0–10.
-              Can be assigned by the sensor, rule-based logic, or AI.
-          description:
-            type: string
-            description: Short AI/human-readable explanation of the sensor reading.
-          timestamp:
-            type: string
-            format: date-time
-
+    Report a new incident with optional file attachments
+    ---
+    consumes:
+      - multipart/form-data
+    parameters:
+      - in: formData
+        name: type
+        type: string
+        required: true
+        description: Type of incident (forest_fire, blackout, flood, etc.)
+      - in: formData
+        name: latitude
+        type: number
+        required: true
+        description: Latitude of the incident
+      - in: formData
+        name: longitude
+        type: number
+        required: true
+        description: Longitude of the incident
+      - in: formData
+        name: description
+        type: string
+        required: false
+        description: Free-text description of the incident
+      - in: formData
+        name: files
+        type: file
+        required: false
+        description: One or more files (images, PDFs, etc.)
+        multiple: true
+      - in: formData
+        name: severity
+        type: number
+        required: false
+        description: Severity of the incident
+    responses:
+      201:
+        description: Incident created successfully
+        schema:
+          type: object
+          properties:
+            incident_id:
+              type: integer
+            saved_files:
+              type: array
+              items:
+                type: string
+      400:
+        description: Missing or invalid parameters
     """
     db = get_db()
-    incident_id = request.args.get("incident_id", type=int)
-    limit = request.args.get("limit", type=int)
-    if not limit or limit <= 0:
-        limit = 50
+    cur = db.cursor()
+    data = request.get_json(force=True)
+    desc = data.get("description")
+    inc_type = data.get("type")
+    lat = data.get("latitude")
+    lon = data.get("longitude")
+    severity_score = data.get("severity_score", 0)
+    # status = data.get("status", 'open')
 
-    if incident_id is not None:
-        rows = db.execute(
-            """
-            SELECT * FROM sensor_readings
-            WHERE incident_id = ?
-            ORDER BY timestamp DESC
-            LIMIT ?
-            """,
-            (incident_id, limit),
-        ).fetchall()
-    else:
-        rows = db.execute(
-            """
-            SELECT * FROM sensor_readings
-            ORDER BY timestamp DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+    if not inc_type or lat is None or lon is None:
+        return jsonify({"error": "type, latitude, longitude are required as form fields"}), 400
 
-    readings = []
-    for r in rows:
-        readings.append({
-            "id": r["id"],
-            "sensor_id": r["sensor_id"],
-            "incident_id": r["incident_id"],
-            "metric_type": r["metric_type"],
-            "value": r["value"],
-            "unit": r["unit"],
-            "severity": r["severity"],          
-            "description": r["description"],    
-            "timestamp": r["timestamp"],
-        })
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except ValueError:
+        return jsonify({"error": "latitude and longitude must be numeric"}), 400
 
-    return jsonify(readings)
+    # 1) Create incident
+    cur.execute(
+        """
+        INSERT INTO incidents (type, description, latitude, longitude, severity_score,)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (inc_type, desc, lat, lon, severity_score),
+    )
+    db.commit()
+    incident_id = cur.lastrowid
+
+    # 2) Handle files (if any)
+    saved_files = []
+    ai_reports = {} 
+
+    if "files" in request.files:
+        files = request.files.getlist("files")
+
+        for f in files:
+            if f.filename == "":
+                continue
+
+            original_name = f.filename
+            safe_name = secure_filename(original_name)
+            file_name = f"{incident_id}_{safe_name}"
+            fs_path = os.path.join(app.config["UPLOAD_FOLDER"], file_name)
+
+            # --- AI DETECTION LOGIC (BEFORE saving) ---
+            ai_result = check_for_ai_fakes(f, f.mimetype)
+            ai_reports[file_name] = ai_result
+
+            is_fake = ai_result.get("is_fake", False)
+            ai_confidence = ai_result.get("confidence", 0.0)
+            ai_reason = ai_result.get("reason", "")
+
+            if is_fake:
+                db.execute("DELETE FROM incidents WHERE id = ?", (incident_id,))
+                db.commit()
+
+                return jsonify({
+                    "error": "fake_image_detected",
+                    "message": (
+                        f"File '{original_name}' was flagged as fake by the AI detector. "
+                        f"Reason: {ai_reason}"
+                    ),
+                    "incident_id": incident_id,
+                    # "ai_reports": ai_reports,
+                }), 400
+
+            # --- File Saving (only for NON-fake images) ---
+            try:
+                f.seek(0)  # reset pointer after AI check
+                f.save(fs_path)
+            except Exception as e:
+                print(f"ERROR: Failed to save file {file_name}: {e}")
+                continue  # skip this file, continue with others
+
+            file_size = os.path.getsize(fs_path)
+            mime_type = f.mimetype
+
+            # 3) Insert attachment record with AI results
+            db.execute(
+                """
+                INSERT INTO incident_attachments
+                    (incident_id, file_name, mime_type, storage_path, file_size_bytes,
+                     uploaded_by)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    incident_id,
+                    file_name,
+                    mime_type,
+                    fs_path,
+                    file_size,
+                    "public_user",
+                ),
+            )
+            saved_files.append(file_name)
+
+        db.commit()
+
+    return jsonify({
+        "incident_id": incident_id,
+        "saved_files": saved_files,
+        # "ai_reports": ai_reports, 
+    }), 201
 
 @app.route("/uploads/<path:filename>", methods=["GET"])
 def serve_file(filename):
