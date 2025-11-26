@@ -7,7 +7,7 @@
 - Description -->
 
 
-<form formGroup="form">
+<form [formGroup]="form" onsubmit="formSubmit()">
     <div class="grid">
         Please select the type of incident you would like to report and add an optional description or picture.
         <label for="typeControl">Type</label>
@@ -22,7 +22,9 @@
         <label for="descriptionControl">Description (optional)</label>
         <textarea id="descriptionControl" formControlName="description"></textarea>
         
-        <label>Upload Picture (optional)</label>
-        <input type="file" name="image" accept="image/*" capture="environment" formControlName="attachments">
+        <label for="attachmentControl" class="button">Upload Picture (optional)</label>
+        <input id="attachmentControl" type="file" name="image" accept="image/*" capture="environment" formControlName="attachments">
+
+        <button type="button" (click)="formSubmit()" [disabled]="!form.valid">Submit Report</button>
     </div>
 </form>
