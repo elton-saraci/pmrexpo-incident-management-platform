@@ -683,69 +683,78 @@ def create_or_update_fire_department():
 
 # --- SENSOR READINGS ---
 
-@app.route("/api/sensors", methods=["GET"])
 def list_sensor_readings():
     """
-    List sensor readings with optional filters
+    Report a new incident based on a sensor reading (JSON-only payload).
     ---
-    tags:
-      - sensors
+    consumes:
+      - application/json
     parameters:
-      - in: query
-        name: incident_id
-        type: integer
-        required: false
-        description: Filter readings only for this incident.
-      - in: query
-        name: limit
-        type: integer
-        required: false
-        description: Limit number of results (default 50).
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            type:
+              type: string
+              description: Type of incident (forest_fire, blackout, flood, etc.)
+            latitude:
+              type: number
+              description: Latitude of the incident
+            longitude:
+              type: number
+              description: Longitude of the incident
+            description:
+              type: string
+              description: Free-text description of the incident
+            severity_score:
+              type: number
+              description: Severity of the incident
     responses:
-      200:
-        description: A list of sensor readings
+      201:
+        description: Incident created successfully
+        schema:
+          type: object
+          properties:
+            incident_id:
+              type: integer
+      400:
+        description: Missing or invalid parameters
     """
+    
     db = get_db()
-    incident_id = request.args.get("incident_id", type=int)
-    limit = request.args.get("limit", type=int)
-    if not limit or limit <= 0:
-        limit = 50
+    cur = db.cursor()
 
-    if incident_id is not None:
-        rows = db.execute(
-            """
-            SELECT * FROM sensor_readings
-            WHERE incident_id = ?
-            ORDER BY timestamp DESC
-            LIMIT ?
-            """,
-            (incident_id, limit),
-        ).fetchall()
-    else:
-        rows = db.execute(
-            """
-            SELECT * FROM sensor_readings
-            ORDER BY timestamp DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+    inc_type = request.form.get("type")
+    lat = request.form.get("latitude")
+    lon = request.form.get("longitude")
+    desc = request.form.get("description")
+    severity_score = request.form.get("severity_score")
 
-    readings = []
-    for r in rows:
-        readings.append({
-            "id": r["id"],
-            "sensor_id": r["sensor_id"],
-            "incident_id": r["incident_id"],
-            "metric_type": r["metric_type"],
-            "value": r["value"],
-            "unit": r["unit"],
-            "severity": r["severity"],
-            "description": r["description"],
-            "timestamp": r["timestamp"],
-        })
+    if not inc_type or lat is None or lon is None:
+        return jsonify({"error": "type, latitude, longitude are required as form fields"}), 400
 
-    return jsonify(readings)
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except ValueError:
+        return jsonify({"error": "latitude and longitude must be numeric"}), 400
+
+    # 1) Create incident
+    cur.execute(
+        """
+        INSERT INTO incidents (type, description, latitude, longitude, severity_score)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (inc_type, desc, lat, lon, severity_score),
+    )
+    db.commit()
+    incident_id = cur.lastrowid
+
+    return jsonify({
+        "incident_id": incident_id,
+    }), 201
 
 
 # --- FILE SERVING FOR UPLOADS ---
