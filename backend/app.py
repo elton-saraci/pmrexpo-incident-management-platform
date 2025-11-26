@@ -655,42 +655,32 @@ def delete_fire_department(fd_id):
 @app.route("/api/sensors", methods=["POST"])
 def list_sensor_readings():
     """
-    Report a new incident with optional file attachments
+    Report a new incident based on a sensor reading (JSON-only payload).
     ---
     consumes:
-      - multipart/form-data
+      - application/json
     parameters:
-      - in: formData
-        name: type
-        type: string
+      - in: body
+        name: body
         required: true
-        description: Type of incident (forest_fire, blackout, flood, etc.)
-      - in: formData
-        name: latitude
-        type: number
-        required: true
-        description: Latitude of the incident
-      - in: formData
-        name: longitude
-        type: number
-        required: true
-        description: Longitude of the incident
-      - in: formData
-        name: description
-        type: string
-        required: false
-        description: Free-text description of the incident
-      - in: formData
-        name: files
-        type: file
-        required: false
-        description: One or more files (images, PDFs, etc.)
-        multiple: true
-      - in: formData
-        name: severity
-        type: number
-        required: false
-        description: Severity of the incident
+        schema:
+          type: object
+          properties:
+            type:
+              type: string
+              description: Type of incident (forest_fire, blackout, flood, etc.)
+            latitude:
+              type: number
+              description: Latitude of the incident
+            longitude:
+              type: number
+              description: Longitude of the incident
+            description:
+              type: string
+              description: Free-text description of the incident
+            severity_score:
+              type: number
+              description: Severity of the incident
     responses:
       201:
         description: Incident created successfully
@@ -699,117 +689,59 @@ def list_sensor_readings():
           properties:
             incident_id:
               type: integer
-            saved_files:
-              type: array
-              items:
-                type: string
       400:
         description: Missing or invalid parameters
     """
     db = get_db()
     cur = db.cursor()
-    data = request.get_json(force=True)
-    desc = data.get("description")
+    # Ensure this endpoint correctly consumes JSON
+    try:
+        data = request.get_json(force=True)
+    except Exception:
+        # Handle case where request body isn't valid JSON
+        return jsonify({"error": "Request must contain valid JSON data"}), 400
+
+    desc = data.get("description", "Sensors")
     inc_type = data.get("type")
     lat = data.get("latitude")
     lon = data.get("longitude")
     severity_score = data.get("severity_score", 0)
-    # status = data.get("status", 'open')
 
     if not inc_type or lat is None or lon is None:
-        return jsonify({"error": "type, latitude, longitude are required as form fields"}), 400
+        # Check if JSON keys are present
+        return jsonify({"error": "type, latitude, longitude are required in JSON body"}), 400
 
     try:
+        # Ensure coordinates are numeric
         lat = float(lat)
         lon = float(lon)
-    except ValueError:
+    except (ValueError, TypeError):
         return jsonify({"error": "latitude and longitude must be numeric"}), 400
 
     # 1) Create incident
-    cur.execute(
-        """
-        INSERT INTO incidents (type, description, latitude, longitude, severity_score,)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (inc_type, desc, lat, lon, severity_score),
-    )
-    db.commit()
-    incident_id = cur.lastrowid
-
-    # 2) Handle files (if any)
-    saved_files = []
-    ai_reports = {} 
-
-    if "files" in request.files:
-        files = request.files.getlist("files")
-
-        for f in files:
-            if f.filename == "":
-                continue
-
-            original_name = f.filename
-            safe_name = secure_filename(original_name)
-            file_name = f"{incident_id}_{safe_name}"
-            fs_path = os.path.join(app.config["UPLOAD_FOLDER"], file_name)
-
-            # --- AI DETECTION LOGIC (BEFORE saving) ---
-            ai_result = check_for_ai_fakes(f, f.mimetype)
-            ai_reports[file_name] = ai_result
-
-            is_fake = ai_result.get("is_fake", False)
-            ai_confidence = ai_result.get("confidence", 0.0)
-            ai_reason = ai_result.get("reason", "")
-
-            if is_fake:
-                db.execute("DELETE FROM incidents WHERE id = ?", (incident_id,))
-                db.commit()
-
-                return jsonify({
-                    "error": "fake_image_detected",
-                    "message": (
-                        f"File '{original_name}' was flagged as fake by the AI detector. "
-                        f"Reason: {ai_reason}"
-                    ),
-                    "incident_id": incident_id,
-                    # "ai_reports": ai_reports,
-                }), 400
-
-            # --- File Saving (only for NON-fake images) ---
-            try:
-                f.seek(0)  # reset pointer after AI check
-                f.save(fs_path)
-            except Exception as e:
-                print(f"ERROR: Failed to save file {file_name}: {e}")
-                continue  # skip this file, continue with others
-
-            file_size = os.path.getsize(fs_path)
-            mime_type = f.mimetype
-
-            # 3) Insert attachment record with AI results
-            db.execute(
-                """
-                INSERT INTO incident_attachments
-                    (incident_id, file_name, mime_type, storage_path, file_size_bytes,
-                     uploaded_by)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    incident_id,
-                    file_name,
-                    mime_type,
-                    fs_path,
-                    file_size,
-                    "public_user",
-                ),
-            )
-            saved_files.append(file_name)
-
+    # NOTE: You had a trailing comma after severity_score in your SQL,
+    # which is likely another error if you're using an older SQLite or SQL version.
+    # The SQL is fixed below.
+    try:
+        cur.execute(
+            """
+            INSERT INTO incidents (type, description, latitude, longitude, severity_score)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (inc_type, desc, lat, lon, severity_score),
+        )
         db.commit()
+        incident_id = cur.lastrowid
+    except sqlite3.OperationalError as e:
+        # Catches the potential error from the trailing comma in the original SQL
+        print(f"SQL Error: {e}")
+        return jsonify({"error": "Database error during incident creation."}), 500
 
+
+    # 2) Remove all file/AI detection logic (steps 2 and 3) here for a pure sensor endpoint.
+    
     return jsonify({
         "incident_id": incident_id,
-        "saved_files": saved_files,
-        # "ai_reports": ai_reports, 
     }), 201
 
 @app.route("/uploads/<path:filename>", methods=["GET"])

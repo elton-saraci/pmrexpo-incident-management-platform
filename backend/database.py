@@ -27,7 +27,7 @@ def create_tables():
     CREATE TABLE IF NOT EXISTS incidents (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         type TEXT NOT NULL,              -- forest_fire, blackout, flood, etc.
-        description TEXT,
+        description TEXT DEFAULT 'SENSORS' ,
         latitude REAL NOT NULL,
         longitude REAL NOT NULL,
         status TEXT DEFAULT 'open',      -- open, in_progress, resolved
