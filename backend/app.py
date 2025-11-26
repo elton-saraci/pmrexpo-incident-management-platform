@@ -5,7 +5,10 @@ import os
 import sqlite3
 import math
 from flasgger import Swagger
+import requests 
+import json 
 
+AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:8081")
 DB_NAME = "crisis_ai.db"
 UPLOAD_FOLDER = "uploads"
 app = Flask(__name__)
@@ -35,6 +38,50 @@ def close_db(exc):
     db = g.pop("db", None)
     if db is not None:
         db.close()
+
+def check_for_ai_fakes(file_stream, mime_type):
+    """
+    Sends an image file stream to the AI service for fake image detection.
+    Returns the AI service response body or a default error structure.
+    """
+    if not mime_type.startswith("image/"):
+        # Skip non-image files
+        return {"is_fake": False, "confidence": 1.0, "reason": "Not an image, skipped AI check."}
+
+    # Reset file stream position to the beginning before sending
+    file_stream.seek(0)
+    
+    # Prepare the file for multipart/form-data upload to the AI service
+    # The 'file_stream' is a SpooledTemporaryFile from Flask's request.files
+    files = {
+        'file': (file_stream.filename, file_stream, mime_type)
+    }
+
+    ai_detection_url = f"{AI_SERVICE_URL}/detect-fake-image"
+    
+    try:
+        # Note: requests.post() handles the multipart/form-data encoding
+        response = requests.post(ai_detection_url, files=files, timeout=10)
+        
+        if response.status_code == 200:
+            # AI service returned a successful detection result
+            return response.json()
+        else:
+            # AI service returned an error (e.g., 400 or 500)
+            print(f"ERROR: AI Service failed with status {response.status_code}: {response.text}")
+            return {
+                "is_fake": False, 
+                "confidence": 0.0, 
+                "reason": f"AI service error: Status {response.status_code} - {response.text[:100]}"
+            }
+
+    except requests.exceptions.RequestException as e:
+        print(f"ERROR: Failed to connect to AI Service at {ai_detection_url}: {e}")
+        return {
+            "is_fake": False,
+            "confidence": 0.0,
+            "reason": f"AI service connection failed: {e}"
+        }
 
 
 # --- INCIDENT CRUD ENDPOINTS ---
@@ -86,6 +133,9 @@ def report_incident_with_files():
               type: array
               items:
                 type: string
+            ai_reports:
+              type: object
+              description: Summary of AI detection results for uploaded files
       400:
         description: Missing or invalid parameters
     """
@@ -119,6 +169,7 @@ def report_incident_with_files():
 
     # 2) Handle files (if any)
     saved_files = []
+    ai_reports = {} 
 
     if "files" in request.files:
         files = request.files.getlist("files")
@@ -127,21 +178,51 @@ def report_incident_with_files():
             if f.filename == "":
                 continue
 
-            # secure filename and make it unique by prefixing incident id
             original_name = f.filename
             safe_name = secure_filename(original_name)
             file_name = f"{incident_id}_{safe_name}"
             fs_path = os.path.join(app.config["UPLOAD_FOLDER"], file_name)
-            f.save(fs_path)
+
+            # --- AI DETECTION LOGIC (BEFORE saving) ---
+            ai_result = check_for_ai_fakes(f, f.mimetype)
+            ai_reports[file_name] = ai_result
+
+            is_fake = ai_result.get("is_fake", False)
+            ai_confidence = ai_result.get("confidence", 0.0)
+            ai_reason = ai_result.get("reason", "")
+
+            if is_fake:
+                db.execute("DELETE FROM incidents WHERE id = ?", (incident_id,))
+                db.commit()
+
+                return jsonify({
+                    "error": "fake_image_detected",
+                    "message": (
+                        f"File '{original_name}' was flagged as fake by the AI detector. "
+                        f"Reason: {ai_reason}"
+                    ),
+                    "incident_id": incident_id,
+                    "ai_reports": ai_reports,
+                }), 400
+
+            # --- File Saving (only for NON-fake images) ---
+            try:
+                f.seek(0)  # reset pointer after AI check
+                f.save(fs_path)
+            except Exception as e:
+                print(f"ERROR: Failed to save file {file_name}: {e}")
+                continue  # skip this file, continue with others
 
             file_size = os.path.getsize(fs_path)
             mime_type = f.mimetype
 
+            # 3) Insert attachment record with AI results
             db.execute(
                 """
                 INSERT INTO incident_attachments
-                    (incident_id, file_name, mime_type, storage_path, file_size_bytes, uploaded_by)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (incident_id, file_name, mime_type, storage_path, file_size_bytes,
+                     uploaded_by, ai_is_fake, ai_confidence, ai_reason)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     incident_id,
@@ -150,6 +231,9 @@ def report_incident_with_files():
                     fs_path,
                     file_size,
                     "public_user",
+                    is_fake,
+                    ai_confidence,
+                    ai_reason,
                 ),
             )
             saved_files.append(file_name)
@@ -159,6 +243,7 @@ def report_incident_with_files():
     return jsonify({
         "incident_id": incident_id,
         "saved_files": saved_files,
+        "ai_reports": ai_reports, 
     }), 201
 
 
@@ -275,7 +360,7 @@ def list_incidents():
             "priority_score": r["priority_score"],
             "priority_explanation": r["priority_explanation"],
             "created_at": r["created_at"],
-            "attachments": attachments,  # <- here!
+            "attachments": attachments,  
         })
 
     return jsonify(incidents)
