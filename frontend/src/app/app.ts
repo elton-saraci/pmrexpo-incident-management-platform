@@ -5,7 +5,7 @@ import { JsmapComponent } from './jsmap/jsmap';
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [JsmapComponent], // Adds MappositionComponent to the AppComponent template
+  imports: [RouterOutlet, JsmapComponent], // Adds MappositionComponent to the AppComponent template
   templateUrl: './app.html',
   styleUrls: ['./app.scss']
 })
