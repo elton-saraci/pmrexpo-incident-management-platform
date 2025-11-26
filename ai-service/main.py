@@ -117,7 +117,7 @@ class FakeImageResponse(BaseModel):
     reason: str
 
 
-@app.post("/detect_fake_image", response_model=FakeImageResponse)
+@app.post("/detect-fake-image", response_model=FakeImageResponse)
 async def detect_fake_image(file: UploadFile = File(...)):
     """
     Detect whether an uploaded image is likely AI-generated/fake,
@@ -344,7 +344,7 @@ async def call_llm_for_prioritization(
 # --------------------------------------------
 
 @app.post(
-    "/prioritize_incidents",
+    "/resource-allocation",
     response_model=IncidentPrioritizationResponse,
 )
 async def prioritize_incidents(request: IncidentPrioritizationRequest):
