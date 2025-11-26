@@ -1,4 +1,13 @@
 import { Component } from '@angular/core';
+import { FormControl, FormGroup } from '@angular/forms';
+
+// User UI
+// - Send Coordinates
+// - Open Camera
+// 	- jpg
+// - Description
+// - Type
+// 	- Dropdown
 
 @Component({
   selector: 'app-user-component',
@@ -7,5 +16,10 @@ import { Component } from '@angular/core';
   styleUrl: './user-component.scss',
 })
 export class UserComponent {
-
+  form = new FormGroup({
+    type: new FormControl(""),
+    description: new FormControl(""),
+    coordinates: new FormControl(""),
+    attachments: new FormControl("")
+  });
 }

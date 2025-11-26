@@ -1,1 +1,28 @@
-<p>user-component works!</p>
+<!-- TODO User UI
+- Send Coordinates
+- Open Camera
+	- jpg
+- Type
+	- Dropdown
+- Description -->
+
+
+<form formGroup="form">
+    <div class="grid">
+        Please select the type of incident you would like to report and add an optional description or picture.
+        <label for="typeControl">Type</label>
+        <select id="typeControl" formControlName="type">
+            <option value="" disabled selected>Select type of incident</option>
+            <option value="forest_fire">Forest Fire</option>
+            <option value="house_fire">House on Fire</option>
+            <option value="blackout">Blackout</option>
+            <option value="flood">Flood</option>
+        </select>
+    
+        <label for="descriptionControl">Description (optional)</label>
+        <textarea id="descriptionControl" formControlName="description"></textarea>
+        
+        <label>Upload Picture (optional)</label>
+        <input type="file" name="image" accept="image/*" capture="environment" formControlName="attachments">
+    </div>
+</form>
