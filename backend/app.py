@@ -259,6 +259,10 @@ def report_incident_with_files():
     desc = request.form.get("description")
     severity_raw = request.form.get("severity_score")
 
+    desc = request.form.get("description")
+    if desc is None or str(desc).strip() == "":
+        desc = "Triggered by sensors"
+
     if not inc_type or lat is None or lon is None:
         return jsonify({"error": "type, latitude, longitude are required as form fields"}), 400
 
